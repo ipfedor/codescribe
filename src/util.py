@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
 import os
 import sys
@@ -17,6 +18,10 @@ def assert_project_open():
 
 
 def assert_path_exists(path):
+    # В Python 2.7 os.path.exists корректно работает с unicode-строками,
+    # но для надёжности явно преобразуем в байтовую строку, если это unicode
+    if isinstance(path, unicode):
+        path = path.encode('utf-8')
     if not os.path.exists(path):
         raise ValueError("Path " + path + " does not exist")
 

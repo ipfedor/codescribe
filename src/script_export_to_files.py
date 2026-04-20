@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
 from __future__ import print_function
 
@@ -13,6 +14,14 @@ from object_type import get_object_type
 from util import *
 
 
+def safe_print(msg):
+    """Безопасная печать строки с поддержкой UTF-8 в Python 2.7"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('utf-8'))
+
+
 def export_child(child_obj, parent_obj, parent_folder_path):
     child_obj_type = get_object_type(child_obj)
     export_fn = OBJECT_TYPE_TO_EXPORT_FUNCTION.get(child_obj_type)
@@ -20,32 +29,52 @@ def export_child(child_obj, parent_obj, parent_folder_path):
         export_fn(child_obj, parent_obj, parent_folder_path, export_child)
 
 
+def ensure_bytes_path(path):
+    """Преобразует unicode путь в байтовую строку UTF-8 для вызовов os / shutil"""
+    if isinstance(path, unicode):
+        return path.encode('utf-8')
+    return path
+
+
 try:
     print_python_version()
     assert_project_open()
 
     src_folder = get_src_folder(scriptengine.projects.primary)
-    print("Writing to: " + src_folder)
+    safe_print("Writing to: " + src_folder)
 
-    if os.path.exists(src_folder):
-        shutil.rmtree(src_folder)
-    os.mkdir(src_folder)
+    # Безопасное удаление и создание папки
+    src_folder_bytes = ensure_bytes_path(src_folder)
+    if os.path.exists(src_folder_bytes):
+        shutil.rmtree(src_folder_bytes)
+    os.mkdir(src_folder_bytes)
 
     for device_obj in get_device_entrypoints(scriptengine.projects.primary):
-        device_folder = os.path.join(src_folder, device_obj.get_name())
-        os.mkdir(device_folder)
+        device_name = device_obj.get_name()
+        # device_name может быть unicode
+        device_folder = os.path.join(src_folder, device_name)
+        device_folder_bytes = ensure_bytes_path(device_folder)
+        os.mkdir(device_folder_bytes)
 
         application = find_application(device_obj)
         application_folder = os.path.join(device_folder, "application")
-        os.mkdir(application_folder)
+        application_folder_bytes = ensure_bytes_path(application_folder)
+        os.mkdir(application_folder_bytes)
 
         for child_obj in application.get_children():
             export_child(child_obj, application, application_folder)
 
         communication = find_communication(device_obj)
-        export_communication(communication, device_folder)
+        if communication is not None:
+            export_communication(communication, device_folder)
+        else:
+            print("Warning: No Communication object found for device " + device_obj.get_name())
 except Exception as e:
-    print(e)
+    # Безопасный вывод исключения
+    try:
+        print(e)
+    except UnicodeEncodeError:
+        print(unicode(e).encode('utf-8'))
     raise e
 
-print("Done!")
+safe_print("Done!")

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
 from __future__ import print_function
 
@@ -21,7 +22,13 @@ try:
     if ui_continue == scriptengine.PromptResult.Yes:
         import_from_files(scriptengine.projects.primary)
 except Exception as e:
-    print(e)
+    # В Python 2.7 прямое print(e) может вызвать UnicodeEncodeError,
+    # если сообщение исключения содержит не-ASCII символы.
+    # Для безопасного вывода преобразуем в UTF-8.
+    try:
+        print(e)
+    except UnicodeEncodeError:
+        print(unicode(e).encode('utf-8'))
     raise e
 
 print("Done!")

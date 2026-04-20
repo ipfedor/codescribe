@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# REMEMBER: this is python 2.7
+import io
 import os
 
 from communication_import_export import import_communication
@@ -6,14 +9,31 @@ from import_export import *
 from util import *
 
 
+def safe_print(msg):
+    """Безопасная печать строки с поддержкой UTF-8 в Python 2.7"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('utf-8'))
+
+
+def ensure_bytes_path(path):
+    """Преобразует unicode путь в байтовую строку UTF-8 для вызовов os / shutil"""
+    if isinstance(path, unicode):
+        return path.encode('utf-8')
+    return path
+
+
 def first_word_of_line_iter(f):
     for line in f.readlines():
+        # line уже будет unicode, если файл открыт с encoding='utf-8'
         words = line.strip().split()
         if len(words) > 0:
             yield words[0]
 
 
 def import_directory(dir_path, dir_parent_obj):
+    # dir_path может быть unicode, os.listdir вернёт unicode, если путь unicode
     children = os.listdir(dir_path)
     # this is a naughty way to ensure parent POU's are created before their children
     for child in sorted(children, key=lambda x: x.count(".")):
@@ -45,23 +65,28 @@ def import_directory_child(child, dir_path, dir_parent_obj):
             import_native(child, dir_path, dir_parent_obj, import_directory)
         if ext == ".st":
             # Have to check for keywords to determine if POU or DUT
-            with open(full_path, "r") as f:
+            # Используем io.open для корректного чтения UTF-8 файлов
+            with io.open(full_path, "r", encoding='utf-8') as f:
                 for word in first_word_of_line_iter(f):
-                    if word == "TYPE":
+                    if word == u"TYPE":
                         import_dut(child, dir_path, dir_parent_obj, import_directory)
-
-                    if word in ["PROGRAM", "FUNCTION_BLOCK", "FUNCTION"]:
+                        break  # Нашли тип, дальше не ищем
+                    if word in [u"PROGRAM", u"FUNCTION_BLOCK", u"FUNCTION"]:
                         import_pou_st(child, dir_path, dir_parent_obj, import_directory)
+                        break
 
 
 def import_from_files(project):
     src_folder = get_src_folder(project)
-    print("Reading from: " + src_folder)
-    assert_path_exists(src_folder)
+    safe_print("Reading from: " + src_folder)
+    # Преобразуем путь в байтовую строку для проверки существования
+    src_folder_bytes = ensure_bytes_path(src_folder)
+    assert_path_exists(src_folder_bytes)
 
     for device_obj in get_device_entrypoints(project):
         device_folder = os.path.join(src_folder, device_obj.get_name())
-        assert_path_exists(device_folder)
+        device_folder_bytes = ensure_bytes_path(device_folder)
+        assert_path_exists(device_folder_bytes)
 
         application = find_application(device_obj)
         application_folder = os.path.join(device_folder, "application")
@@ -69,4 +94,5 @@ def import_from_files(project):
         import_directory(application_folder, application)
 
         communication = find_communication(device_obj)
-        import_communication(communication, device_folder)
+        if communication is not None:
+            import_communication(communication, device_folder)

@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
 from __future__ import print_function
 
@@ -13,23 +14,38 @@ from project_template import find_template_paths_and_versions, generate_template
 from util import *
 
 
+def safe_print(msg):
+    """Безопасная печать строки с поддержкой UTF-8 в Python 2.7"""
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.encode('utf-8'))
+
+
 def get_new_template_version(template_versions):
     if len(template_versions) < 1:
-        print("No existing template found!")
-        print("New template version: 1")
+        safe_print("No existing template found!")
+        safe_print("New template version: 1")
         return 1
 
     current_version = max(template_versions)
     new_version = current_version + 1
-    print("Found a template with version: " + str(current_version))
-    print("New template version: " + str(new_version))
+    safe_print("Found a template with version: " + str(current_version))
+    safe_print("New template version: " + str(new_version))
     return new_version
 
 
 def delete_old_templates(template_paths):
-    print("Deleting " + str(len(template_paths)) + " old template(s):")
+    safe_print("Deleting " + str(len(template_paths)) + " old template(s):")
     for path in template_paths:
-        print("    " + path)
+        # Безопасный вывод пути
+        try:
+            safe_print("    " + path)
+        except UnicodeEncodeError:
+            safe_print("    " + path.encode('utf-8'))
+        # Безопасное удаление файла
+        if isinstance(path, unicode):
+            path = path.encode('utf-8')
         os.remove(path)
 
 
@@ -41,7 +57,13 @@ try:
     new_template_version = get_new_template_version(template_versions)
     new_template_path = generate_template_path(scriptengine.projects.primary, new_template_version)
 
-    shutil.copyfile(scriptengine.projects.primary.path, new_template_path)
+    # Безопасное копирование: преобразуем пути в байтовые строки, если это unicode
+    src_path = scriptengine.projects.primary.path
+    if isinstance(src_path, unicode):
+        src_path = src_path.encode('utf-8')
+    if isinstance(new_template_path, unicode):
+        new_template_path = new_template_path.encode('utf-8')
+    shutil.copyfile(src_path, new_template_path)
     scriptengine.projects.open(new_template_path, primary=False)
 
     template_project = scriptengine.projects.get_by_path(new_template_path)
@@ -50,14 +72,19 @@ try:
         application = find_application(device_obj)
         remove_tracked_objects(application.get_children())
         communication = find_communication(device_obj)
-        remove_tracked_communication_devices(communication)
+        if communication is not None:
+            remove_tracked_communication_devices(communication)
 
     template_project.save()
 
     if len(template_paths) > 0:
         delete_old_templates(template_paths)
 except Exception as e:
-    print(e)
+    # Безопасный вывод исключения
+    try:
+        print(e)
+    except UnicodeEncodeError:
+        print(unicode(e).encode('utf-8'))
     raise e
 
-print("Done!")
+safe_print("Done!")

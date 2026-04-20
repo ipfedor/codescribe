@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
 import inspect
 
@@ -5,7 +6,7 @@ import inspect
 class ObjectType:
     POU = "POU"
     DUT = "DUT"
-    GVL = "EVL"
+    GVL = "GVL"
     EVC = "EVC"
     METHOD = "METHOD"
     PROPERTY = "PROPERTY"
@@ -27,7 +28,7 @@ class ObjectType:
         for member, value in inspect.getmembers(cls):
             if not member.startswith("_") and not inspect.ismethod(value):
                 elements.append(value)
-        return elements
+        return iter(elements)
 
 
 # Other mapping lists:
@@ -55,4 +56,12 @@ GUID_TYPE_MAPPING = {
 
 
 def get_object_type(obj):
-    return GUID_TYPE_MAPPING.get(str(obj.type), ObjectType.UNKNOWN)
+    # Безопасное преобразование GUID в байтовую строку (str в Python 2)
+    guid = obj.type
+    if guid is None:
+        return ObjectType.UNKNOWN
+    if isinstance(guid, unicode):
+        guid = guid.encode('utf-8')
+    else:
+        guid = str(guid)
+    return GUID_TYPE_MAPPING.get(guid, ObjectType.UNKNOWN)

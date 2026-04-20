@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
 from __future__ import print_function
 
@@ -15,7 +16,11 @@ def get_newest_template_path(template_paths, template_versions):
     newest_version = max(template_versions)
     newest_idx = template_versions.index(newest_version)
     newest_path = template_paths[newest_idx]
-    print("Found template version " + str(newest_version) + " at " + newest_path)
+    # Безопасный вывод: путь может содержать не-ASCII символы
+    try:
+        print("Found template version " + str(newest_version) + " at " + newest_path)
+    except UnicodeEncodeError:
+        print(("Found template version " + str(newest_version) + " at " + unicode(newest_path).encode('utf-8')))
     return newest_path
 
 
@@ -38,6 +43,12 @@ try:
         project_path = scriptengine.projects.primary.path
 
         scriptengine.projects.primary.close()
+        # В Python 2.7 shutil.copyfile может работать с unicode путями,
+        # но для надёжности преобразуем в байтовую строку, если это unicode
+        if isinstance(newest_template_path, unicode):
+            newest_template_path = newest_template_path.encode('utf-8')
+        if isinstance(project_path, unicode):
+            project_path = project_path.encode('utf-8')
         shutil.copyfile(newest_template_path, project_path)
         scriptengine.projects.open(project_path)
 
@@ -45,7 +56,11 @@ try:
 
         scriptengine.projects.primary.save()
 except Exception as e:
-    print(e)
+    # Безопасный вывод исключения с возможными не-ASCII символами
+    try:
+        print(e)
+    except UnicodeEncodeError:
+        print(unicode(e).encode('utf-8'))
     raise e
 
 print("Done!")
