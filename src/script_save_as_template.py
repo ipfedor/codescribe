@@ -14,14 +14,6 @@ from project_template import find_template_paths_and_versions, generate_template
 from util import *
 
 
-def safe_print(msg):
-    """Безопасная печать строки с поддержкой UTF-8 в Python 2.7"""
-    try:
-        print(msg)
-    except UnicodeEncodeError:
-        print(msg.encode('utf-8'))
-
-
 def get_new_template_version(template_versions):
     if len(template_versions) < 1:
         safe_print("No existing template found!")

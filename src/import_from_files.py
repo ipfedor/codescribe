@@ -9,21 +9,6 @@ from import_export import *
 from util import *
 
 
-def safe_print(msg):
-    """Безопасная печать строки с поддержкой UTF-8 в Python 2.7"""
-    try:
-        print(msg)
-    except UnicodeEncodeError:
-        print(msg.encode('utf-8'))
-
-
-def ensure_bytes_path(path):
-    """Преобразует unicode путь в байтовую строку UTF-8 для вызовов os / shutil"""
-    if isinstance(path, unicode):
-        return path.encode('utf-8')
-    return path
-
-
 def first_word_of_line_iter(f):
     for line in f.readlines():
         # line уже будет unicode, если файл открыт с encoding='utf-8'
@@ -80,12 +65,12 @@ def import_from_files(project):
     src_folder = get_src_folder(project)
     safe_print("Reading from: " + src_folder)
     # Преобразуем путь в байтовую строку для проверки существования
-    src_folder_bytes = ensure_bytes_path(src_folder)
+    src_folder_bytes = ensure_unicode_path(src_folder)
     assert_path_exists(src_folder_bytes)
 
     for device_obj in get_device_entrypoints(project):
         device_folder = os.path.join(src_folder, device_obj.get_name())
-        device_folder_bytes = ensure_bytes_path(device_folder)
+        device_folder_bytes = ensure_unicode_path(device_folder)
         assert_path_exists(device_folder_bytes)
 
         application = find_application(device_obj)

@@ -49,3 +49,33 @@ def first_or_error(lst, err):
         return next(iter(lst))
     except StopIteration:
         raise ValueError(err)
+
+def safe_print(msg):
+    """Безопасная печать строки с поддержкой UTF-8 в Python 2.7"""
+    if isinstance(msg, unicode):
+        msg = msg.encode('utf-8')
+    try:
+        print(msg)
+    except UnicodeEncodeError:
+        print(msg.decode('utf-8').encode('utf-8'))
+
+def fix_encoding(name):
+    """
+    Исправляет Mojibake: если name — это байтовая строка, которая выглядит как
+    UTF-8, но ошибочно интерпретируется как Latin-1, преобразует в правильную Unicode.
+    """
+    if isinstance(name, unicode):
+        return name
+    # Пытаемся перекодировать из Latin-1 в UTF-8
+    try:
+        # Сначала декодируем как Latin-1 (получаем искажённые символы), затем кодируем в UTF-8 и декодируем в Unicode
+        return name.decode('latin-1').encode('utf-8').decode('utf-8')
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        # Если не получилось, возвращаем как есть
+        return name.decode('utf-8', errors='replace')
+
+def ensure_unicode_path(path):
+    """Преобразует байтовый путь в unicode с исправлением кодировки"""
+    if isinstance(path, str) and not isinstance(path, unicode):
+        path = fix_encoding(path)
+    return path

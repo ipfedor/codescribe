@@ -4,6 +4,8 @@ from __future__ import print_function
 
 import os
 import shutil
+import sys
+#import imp
 
 import scriptengine  # type: ignore
 
@@ -13,14 +15,11 @@ from object_type import get_object_type
 from util import *
 
 
-
-def safe_print(msg):
-    """Безопасная печать строки с поддержкой UTF-8 в Python 2.7"""
-    try:
-        print(msg)
-    except UnicodeEncodeError:
-        print(msg.encode('utf-8'))
-
+# ----------------------------------------------------------------------
+# Настройка кодировки по умолчанию
+# ----------------------------------------------------------------------
+#imp.reload(sys)
+#sys.setdefaultencoding('utf-8')
 
 def export_child(child_obj, parent_obj, parent_folder_path):
     child_obj_type = get_object_type(child_obj)
@@ -29,24 +28,20 @@ def export_child(child_obj, parent_obj, parent_folder_path):
         export_fn(child_obj, parent_obj, parent_folder_path, export_child)
 
 
-def ensure_bytes_path(path):
-    """Преобразует unicode путь в байтовую строку UTF-8 для вызовов os / shutil"""
-    if isinstance(path, unicode):
-        return path.encode('utf-8')
-    return path
-
-
 # Список имен объектов, которые НЕ нужно экспортировать (служебные)
-SKIP_NAMES = ['Library Manager', 'Task Configuration', 'Symbol Configuration',
-              'Visualization Manager', 'Alarm Configuration', 'Recipe Manager']
+SKIP_NAMES = [
+    u'Library Manager', u'Task Configuration', u'Symbol Configuration',
+    u'Visualization Manager', u'Alarm Configuration', u'Recipe Manager'
+]
 
 
 def should_skip(obj):
     """Определяет, нужно ли пропустить объект при экспорте"""
     name = obj.get_name()
+    if isinstance(name, str) and not isinstance(name, unicode):
+        name = fix_encoding(name)
     if name in SKIP_NAMES:
         return True
-    # Пропускаем объекты, которые не являются экспортируемыми типами
     obj_type = get_object_type(obj)
     if obj_type not in OBJECT_TYPE_TO_EXPORT_FUNCTION:
         return True
@@ -58,44 +53,47 @@ def export_library_object(obj, parent_folder_path):
     obj_type = get_object_type(obj)
     export_fn = OBJECT_TYPE_TO_EXPORT_FUNCTION.get(obj_type)
     if export_fn is not None:
-        # Для корневых объектов parent_obj = None
         export_fn(obj, None, parent_folder_path, export_child)
 
 
 def export_folder(folder_obj, parent_folder_path):
-    """Рекурсивно экспортирует содержимое папки (например, POUs)"""
+    """Рекурсивно экспортирует содержимое папки с исправлением кодировки имён"""
     folder_name = folder_obj.get_name()
+    if isinstance(folder_name, str) and not isinstance(folder_name, unicode):
+        folder_name = fix_encoding(folder_name)
+    # Формируем путь в unicode
     folder_path = os.path.join(parent_folder_path, folder_name)
-    folder_path_bytes = ensure_bytes_path(folder_path)
-    if not os.path.exists(folder_path_bytes):
-        os.mkdir(folder_path_bytes)
+    # Создаём папку
+    if not os.path.exists(folder_path):
+        os.mkdir(folder_path)
 
     for child in folder_obj.get_children():
         if should_skip(child):
             continue
         child_type = get_object_type(child)
-        # Если это папка (имеет дочерние элементы), рекурсивно обрабатываем
         if child.get_children():
             export_folder(child, folder_path)
         else:
-            # Экспортируем сам объект
             export_fn = OBJECT_TYPE_TO_EXPORT_FUNCTION.get(child_type)
             if export_fn is not None:
                 export_fn(child, folder_obj, folder_path, export_child)
 
 
+# ----------------------------------------------------------------------
+# Основной блок
+# ----------------------------------------------------------------------
 try:
     print_python_version()
     assert_project_open()
 
     src_folder = get_src_folder(scriptengine.projects.primary)
-    safe_print("Writing to: " + src_folder)
+    src_folder = ensure_unicode_path(src_folder)
+    safe_print(u"Writing to: " + src_folder)
 
-    # Безопасное удаление и создание папки
-    src_folder_bytes = ensure_bytes_path(src_folder)
-    if os.path.exists(src_folder_bytes):
-        shutil.rmtree(src_folder_bytes)
-    os.mkdir(src_folder_bytes)
+    # Безопасное удаление и создание корневой папки
+    if os.path.exists(src_folder):
+        shutil.rmtree(src_folder)
+    os.mkdir(src_folder)
 
     project = scriptengine.projects.primary
     top_level_objs = project.get_children()
@@ -104,17 +102,12 @@ try:
         if should_skip(obj):
             continue
 
-        # Если объект является контейнером (папкой с дочерними элементами)
         if obj.get_children():
             export_folder(obj, src_folder)
         else:
-            # Одиночный экспортируемый объект (например, POU в корне старого проекта)
             export_library_object(obj, src_folder)
 
     safe_print("Done!")
 except Exception as e:
-    try:
-        print(e)
-    except UnicodeEncodeError:
-        print(unicode(e).encode('utf-8'))
+    safe_print("ERROR: " + str(e))
     raise e

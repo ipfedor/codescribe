@@ -11,21 +11,6 @@ IMPLEMENTATION_DELIMITER_SPLIT = u"// --- BEGIN IMPLEMENTATION ---"
 IMPLEMENTATION_DELIMITER_INSERT = u"\n" + IMPLEMENTATION_DELIMITER_SPLIT + u"\n\n"
 
 
-def safe_print(msg):
-    """Безопасная печать строки с поддержкой UTF-8 в Python 2.7"""
-    try:
-        print(msg)
-    except UnicodeEncodeError:
-        print(msg.encode('utf-8'))
-
-
-def ensure_bytes_path(path):
-    """Преобразует unicode путь в байтовую строку UTF-8 для вызовов os / shutil"""
-    if isinstance(path, unicode):
-        return path.encode('utf-8')
-    return path
-
-
 def write_st(obj, f):
     f.write(obj.textual_declaration.text)
     f.write(IMPLEMENTATION_DELIMITER_INSERT)
@@ -53,7 +38,7 @@ def import_st_decl_only(f, obj):
 def write_native(obj, path, recursive=False):
     # path может быть байтовой строкой или unicode; для export_native нужно передать str в Python 2.7?
     # obj.export_native ожидает, вероятно, байтовую строку. Преобразуем в bytes.
-    path_bytes = ensure_bytes_path(path)
+    path_bytes = ensure_unicode_path(path)
     obj.export_native(path_bytes, recursive=recursive)
 
     # используем io.open для чтения/записи UTF-8
@@ -95,13 +80,13 @@ def read_native(f, obj):
     # f - это путь (строка) или файловый объект? По контексту - путь.
     # В вызовах read_native(os.path.join(...), dir_parent_obj) - передаётся путь.
     # Преобразуем в байтовую строку для import_native.
-    path_bytes = ensure_bytes_path(f)
+    path_bytes = ensure_unicode_path(f)
     obj.import_native(path_bytes)
 
 
 def export_folder(child_obj, parent_obj, parent_folder_path, export_child_fn):
     child_obj_folder = os.path.join(parent_folder_path, child_obj.get_name())
-    child_obj_folder_bytes = ensure_bytes_path(child_obj_folder)
+    child_obj_folder_bytes = ensure_unicode_path(child_obj_folder)
     os.mkdir(child_obj_folder_bytes)
     for c in child_obj.get_children():
         export_child_fn(c, child_obj, child_obj_folder)
@@ -120,7 +105,7 @@ def import_folder(child, dir_path, dir_parent_obj, import_dir_fn):
 def export_pou(child_obj, parent_obj, parent_folder_path, export_child_fn):
     if child_obj.has_textual_implementation:
         file_path = os.path.join(parent_folder_path, child_obj.get_name() + u".st")
-        file_path_bytes = ensure_bytes_path(file_path)
+        file_path_bytes = ensure_unicode_path(file_path)
         with io.open(file_path_bytes, "w", encoding='utf-8') as f:
             write_st(child_obj, f)
     else:
@@ -134,7 +119,7 @@ def import_pou_st(child, dir_path, dir_parent_obj, import_dir_fn):
     filename, _ = os.path.splitext(child)
     pou_obj = dir_parent_obj.create_pou(filename)
     full_path = os.path.join(dir_path, child)
-    full_path_bytes = ensure_bytes_path(full_path)
+    full_path_bytes = ensure_unicode_path(full_path)
     with io.open(full_path_bytes, "r", encoding='utf-8') as f:
         import_st(f, pou_obj)
 
@@ -146,7 +131,7 @@ def export_gvl(child_obj, parent_obj, parent_folder_path, export_child_fn):
     """
     write_native(child_obj, os.path.join(parent_folder_path, child_obj.get_name() + u".gvl.xml"), recursive=False)
     file_path = os.path.join(parent_folder_path, child_obj.get_name() + u".gvl.st")
-    file_path_bytes = ensure_bytes_path(file_path)
+    file_path_bytes = ensure_unicode_path(file_path)
     with io.open(file_path_bytes, "w", encoding='utf-8') as f:
         write_st_decl_only(child_obj, f)
 
@@ -166,7 +151,7 @@ def import_gvl(child, dir_path, dir_parent_obj, import_dir_fn):
         raise ValueError(u"Expected GVL st file!")
 
     gvl_xml_path = os.path.join(dir_path, name + u".gvl.xml")
-    gvl_xml_path_bytes = ensure_bytes_path(gvl_xml_path)
+    gvl_xml_path_bytes = ensure_unicode_path(gvl_xml_path)
     if os.path.exists(gvl_xml_path_bytes):
         import_native(gvl_xml_path, dir_path, dir_parent_obj, import_dir_fn)  # import_native ожидает путь
         imported_obj = first_of_type_or_error(
@@ -176,7 +161,7 @@ def import_gvl(child, dir_path, dir_parent_obj, import_dir_fn):
         imported_obj = dir_parent_obj.create_gvl(name)
 
     full_path = os.path.join(dir_path, child)
-    full_path_bytes = ensure_bytes_path(full_path)
+    full_path_bytes = ensure_unicode_path(full_path)
     with io.open(full_path_bytes, "r", encoding='utf-8') as f:
         import_st_decl_only(f, imported_obj)
 
@@ -195,7 +180,7 @@ def import_native(child, dir_path, dir_parent_obj, import_dir_fn):
 
 def export_dut(child_obj, parent_obj, parent_folder_path, export_child_fn):
     file_path = os.path.join(parent_folder_path, child_obj.get_name() + u".st")
-    file_path_bytes = ensure_bytes_path(file_path)
+    file_path_bytes = ensure_unicode_path(file_path)
     with io.open(file_path_bytes, "w", encoding='utf-8') as f:
         f.write(child_obj.textual_declaration.text)
 
@@ -204,7 +189,7 @@ def import_dut(child, dir_path, dir_parent_obj, import_dir_fn):
     filename, _ = os.path.splitext(child)
     dut_obj = dir_parent_obj.create_dut(filename)
     full_path = os.path.join(dir_path, child)
-    full_path_bytes = ensure_bytes_path(full_path)
+    full_path_bytes = ensure_unicode_path(full_path)
     with io.open(full_path_bytes, "r", encoding='utf-8') as f:
         content = f.read()
         dut_obj.textual_declaration.replace(content.strip() + u"\n")
@@ -213,7 +198,7 @@ def import_dut(child, dir_path, dir_parent_obj, import_dir_fn):
 def export_method(child_obj, parent_obj, parent_folder_path, export_child_fn):
     if child_obj.has_textual_implementation:
         file_path = os.path.join(parent_folder_path, parent_obj.get_name() + u"." + child_obj.get_name() + u".st")
-        file_path_bytes = ensure_bytes_path(file_path)
+        file_path_bytes = ensure_unicode_path(file_path)
         with io.open(file_path_bytes, "w", encoding='utf-8') as f:
             write_st(child_obj, f)
     else:
@@ -226,7 +211,7 @@ def export_method(child_obj, parent_obj, parent_folder_path, export_child_fn):
 
 def import_method_st(child, dir_path, dir_parent_obj, import_dir_fn):
     full_path = os.path.join(dir_path, child)
-    full_path_bytes = ensure_bytes_path(full_path)
+    full_path_bytes = ensure_unicode_path(full_path)
     filename, _ = os.path.splitext(child)
     parent_name, method_name = filename.split(u".")
     parent_obj = first_of_type_or_error(
@@ -250,7 +235,7 @@ def export_sub_pou(child_obj, parent_obj, parent_folder_path, export_child_fn):
 
 def import_sub_pou(child, dir_path, dir_parent_obj, import_dir_fn):
     full_path = os.path.join(dir_path, child)
-    full_path_bytes = ensure_bytes_path(full_path)
+    full_path_bytes = ensure_unicode_path(full_path)
     filename, _ = os.path.splitext(child)
     parent_name = filename.split(u".")[0]
     parent_obj = first_of_type_or_error(
