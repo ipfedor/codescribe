@@ -7,9 +7,14 @@ class ObjectType:
     POU = "POU"
     DUT = "DUT"
     GVL = "GVL"
+    GVL_PERSISTENT = "GVL_PERSISTENT"
+    INTERFACE = "INTERFACE"
     EVC = "EVC"
+    TASK = "TASK"
     METHOD = "METHOD"
+    METHOD_NORET = "METHOD_NORET"
     PROPERTY = "PROPERTY"
+    PROPERTY_METHOD = "PROPERTY_METHOD"
     ACTION = "ACTION"
     TRANSITION = "TRANSITION"
     LIBRARY_MANAGER = "LIBRARY_MANAGER"
@@ -18,9 +23,13 @@ class ObjectType:
     PROJECT_SETTINGS = "PROJECT_SETTINGS"
     DEVICE = "DEVICE"
     FOLDER = "FOLDER"
+    IMAGEPOOL = "IMAGEPOOL"
     CALL_TO_POU = "CALL_TO_POU"
     VISUALISATION = "VISUALISATION"
+    TEXTLIST = "TEXTLIST"
+    GLOBAL_TEXTLIST = "GLOBAL_TEXTLIST"
     UNKNOWN = "UNKNOWN"
+    
 
     @classmethod
     def __iter__(cls):
@@ -35,15 +44,29 @@ class ObjectType:
 # https://github.com/tkucic/codesys_workflow_automation/blob/main/src/codesysBulker.py#L9
 # https://github.com/18thCentury/CodeSys/blob/master/export.py#L10
 
+#SoftMotion_General_Axis_Pool=Guid('e9159722-55bc-49e5-8034-fbd278ef718f')
+
 GUID_TYPE_MAPPING = {
     "6f9dac99-8de1-4efc-8465-68ac443b7d08": ObjectType.POU,
     "2db5746d-d284-4425-9f7f-2663a34b0ebc": ObjectType.DUT,
     "ffbfa93a-b94d-45fc-a329-229860183b1d": ObjectType.GVL,
+    "98a2708a-9b18-4f31-82ed-a1465b24fa2d": ObjectType.TASK,
+    "261bd6e6-249c-4232-bb6f-84c2fbeef430": ObjectType.GVL_PERSISTENT,
+
     "327b6465-4e7f-4116-846a-8369c730fd66": ObjectType.EVC,
+
     "f8a58466-d7f6-439f-bbb8-d4600e41d099": ObjectType.METHOD,
+    "bb0b9044-714e-4614-ad3e-33cbdf34d16b": ObjectType.IMAGEPOOL,
+    "f89f7675-27f1-46b3-8abb-b7da8e774ffd": ObjectType.METHOD_NORET,
+    "6654496c-404d-479a-aad2-8551054e5f1e": ObjectType.INTERFACE,
     "5a3b8626-d3e9-4f37-98b5-66420063d91e": ObjectType.PROPERTY,
+    "792f2eb6-721e-4e64-ba20-bc98351056db": ObjectType.PROPERTY_METHOD,
     "8ac092e5-3128-4e26-9e7e-11016c6684f2": ObjectType.ACTION,
+    "2bef0454-1bd3-412a-ac2c-af0f31dbc40f": ObjectType.TEXTLIST,
+    "63784cbb-9ba0-45e6-9d69-babf3f040511": ObjectType.GLOBAL_TEXTLIST,
+
     "a10c6218-cb94-436f-91c6-e1652575253d": ObjectType.TRANSITION,
+
     "adb5cb65-8e1d-4a00-b70a-375ea27582f3": ObjectType.LIBRARY_MANAGER,
     "ae1de277-a207-4a28-9efb-456c06bd52f3": ObjectType.TASK_CONFIGURATION,
     "085afe48-c5d8-4ea5-ab0d-b35701fa6009": ObjectType.PROJECT_INFORMATION,

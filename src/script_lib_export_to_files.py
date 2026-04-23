@@ -10,8 +10,8 @@ import sys
 import scriptengine  # type: ignore
 
 from entrypoint import get_src_folder
-from import_export import OBJECT_TYPE_TO_EXPORT_FUNCTION
-from object_type import get_object_type
+from import_export import OBJECT_TYPE_TO_EXPORT_FUNCTION, write_native
+from object_type import ObjectType, get_object_type
 from util import *
 
 
@@ -26,6 +26,26 @@ def export_child(child_obj, parent_obj, parent_folder_path):
     export_fn = OBJECT_TYPE_TO_EXPORT_FUNCTION.get(child_obj_type)
     if export_fn is not None:
         export_fn(child_obj, parent_obj, parent_folder_path, export_child)
+        return
+
+    # Фолбэк: в структуре CODESYS встречаются объекты-диаграммы с GUID,
+    # которые не заведены в `object_type.py`. Если их пропустить, мы получим
+    # дочерние папки/элементы без XML родителя (типичный случай: CFC с вложенным LD).
+    if child_obj_type == ObjectType.UNKNOWN:
+        try:
+            name = child_obj.get_name()
+            if isinstance(name, str) and not isinstance(name, unicode):
+                name = fix_encoding(name)
+            export_path = os.path.join(parent_folder_path, name + u".xml")
+            write_native(child_obj, export_path, recursive=False)
+        except Exception as e:
+            try:
+                safe_print(u"Warning: failed native export for UNKNOWN '" + child_obj.get_name() + u"' (" + unicode(child_obj.type) + u"): " + unicode(e))
+            except Exception:
+                safe_print(u"Warning: failed native export for UNKNOWN object")
+
+    for c in child_obj.get_children():
+        export_child(c, child_obj, parent_folder_path)
 
 
 # Список имен объектов, которые НЕ нужно экспортировать (служебные)
@@ -43,7 +63,8 @@ def should_skip(obj):
     if name in SKIP_NAMES:
         return True
     obj_type = get_object_type(obj)
-    if obj_type not in OBJECT_TYPE_TO_EXPORT_FUNCTION:
+    # UNKNOWN не пропускаем — попробуем выгрузить native xml фолбэком.
+    if obj_type != ObjectType.UNKNOWN and obj_type not in OBJECT_TYPE_TO_EXPORT_FUNCTION:
         return True
     return False
 
@@ -62,7 +83,7 @@ def export_folder(folder_obj, parent_folder_path):
     if isinstance(folder_name, str) and not isinstance(folder_name, unicode):
         folder_name = fix_encoding(folder_name)
     # Формируем путь в unicode
-    folder_path = os.path.join(parent_folder_path, folder_name)
+    folder_path = ensure_unicode_path(os.path.join(parent_folder_path, folder_name))
     # Создаём папку
     if not os.path.exists(folder_path):
         os.mkdir(folder_path)
@@ -71,12 +92,22 @@ def export_folder(folder_obj, parent_folder_path):
         if should_skip(child):
             continue
         child_type = get_object_type(child)
-        if child.get_children():
+        export_fn = OBJECT_TYPE_TO_EXPORT_FUNCTION.get(child_type)
+
+        # Наличие children у объекта (например, CFC с вложенными LD) не означает,
+        # что он является "папкой". Поэтому:
+        # - FOLDER: создаём каталог и уходим в рекурсию
+        # - прочие типы: сначала экспортируем сам объект (создаём .xml/.st),
+        #   затем экспортируем его детей (если они есть) через общий механизм.
+        if child_type == ObjectType.FOLDER:
             export_folder(child, folder_path)
-        else:
-            export_fn = OBJECT_TYPE_TO_EXPORT_FUNCTION.get(child_type)
-            if export_fn is not None:
-                export_fn(child, folder_obj, folder_path, export_child)
+            continue
+
+        if export_fn is not None:
+            export_fn(child, folder_obj, folder_path, export_child)
+
+        for grandchild in child.get_children():
+            export_child(grandchild, child, folder_path)
 
 
 # ----------------------------------------------------------------------
@@ -102,10 +133,13 @@ try:
         if should_skip(obj):
             continue
 
-        if obj.get_children():
+        obj_type = get_object_type(obj)
+        if obj_type == ObjectType.FOLDER:
             export_folder(obj, src_folder)
         else:
             export_library_object(obj, src_folder)
+            for child in obj.get_children():
+                export_child(child, obj, src_folder)
 
     safe_print("Done!")
 except Exception as e:

@@ -256,6 +256,7 @@ OBJECT_TYPE_TO_EXPORT_FUNCTION = {
     ObjectType.TASK_CONFIGURATION: export_native_recursive,
     ObjectType.DUT: export_dut,
     ObjectType.METHOD: export_method,
+    ObjectType.METHOD_NORET: export_method,
     ObjectType.PROPERTY: export_sub_pou,
     ObjectType.ACTION: export_sub_pou,
     ObjectType.TRANSITION: export_sub_pou,
