@@ -141,6 +141,10 @@ try:
             for child in obj.get_children():
                 export_child(child, obj, src_folder)
 
+    # Дополнительная обработка XML (если подключён внешний конвертер).
+    # Важно: запускать после того, как все XML уже записаны на диск.
+    try_run_codesys_export_converter(src_folder)
+
     safe_print("Done!")
 except Exception as e:
     safe_print("ERROR: " + str(e))

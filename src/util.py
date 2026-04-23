@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
 import os
+import subprocess
 import sys
 
 import scriptengine  # type: ignore
@@ -79,3 +80,65 @@ def ensure_unicode_path(path):
     if isinstance(path, str) and not isinstance(path, unicode):
         path = fix_encoding(path)
     return path
+
+
+def _find_codesys_export_converter_script():
+    """
+    Возвращает путь до `codesys_export_to_st.py`, если репозиторий/модуль подключён рядом с codescribe.
+    Если не найден — возвращает None.
+    """
+    # `.../codescribe/src/util.py` -> repo root `.../codescribe`
+    here = os.path.dirname(os.path.abspath(__file__))
+    repo_root = os.path.dirname(here)
+
+    candidates = [
+        os.path.normpath(os.path.join(repo_root, "..", "codesys-export-converter", "codesys_export_to_st.py")),
+        os.path.normpath(os.path.join(repo_root, "codesys-export-converter", "codesys_export_to_st.py")),
+        os.path.normpath(os.path.join(repo_root, "vendor", "codesys-export-converter", "codesys_export_to_st.py")),
+        os.path.normpath(os.path.join(repo_root, "external", "codesys-export-converter", "codesys_export_to_st.py")),
+    ]
+
+    for p in candidates:
+        try:
+            if os.path.exists(p):
+                return p
+        except Exception:
+            pass
+    return None
+
+
+def try_run_codesys_export_converter(xml_root_folder):
+    """
+    Пытается запустить внешний конвертер XML->ST (Python 3) по папке экспорта.
+    Если репозиторий конвертера не подключён/не найден — ничего не делает.
+    """
+    script_path = _find_codesys_export_converter_script()
+    if script_path is None:
+        safe_print(u"Info: codesys-export-converter not connected; skipping extra XML processing")
+        return
+
+    xml_root_folder = ensure_unicode_path(xml_root_folder)
+
+    # Варианты запуска Python 3 на Windows:
+    # - `py -3` (предпочтительно)
+    # - `python` (если python3 стоит по умолчанию в PATH)
+    cmd_candidates = [
+        ["py", "-3", script_path, xml_root_folder, "--inplace", "--dst-suffix", ".xml.st"],
+        ["python", script_path, xml_root_folder, "--inplace", "--dst-suffix", ".xml.st"],
+    ]
+
+    for cmd in cmd_candidates:
+        try:
+            safe_print(u"Running extra XML converter: " + u" ".join([unicode(c) for c in cmd]))
+            rc = subprocess.call(cmd)
+            if rc == 0:
+                safe_print(u"Extra XML conversion done")
+                return
+            safe_print(u"Warning: converter returned non-zero code: " + unicode(rc))
+        except Exception as e:
+            try:
+                safe_print(u"Warning: failed to run converter: " + unicode(e))
+            except Exception:
+                safe_print(u"Warning: failed to run converter")
+
+    safe_print(u"Warning: could not run codesys-export-converter (python3 not found?)")

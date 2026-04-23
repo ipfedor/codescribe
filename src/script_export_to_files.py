@@ -68,6 +68,10 @@ try:
             export_communication(communication, device_folder)
         else:
             print("Warning: No Communication object found for device " + device_obj.get_name())
+
+    # Дополнительная обработка XML (если подключён внешний конвертер).
+    # Важно: запускать после того, как все XML уже записаны на диск.
+    try_run_codesys_export_converter(src_folder)
 except Exception as e:
     # Безопасный вывод исключения
     try:
