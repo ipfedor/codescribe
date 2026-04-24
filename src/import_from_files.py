@@ -26,6 +26,14 @@ def import_directory(dir_path, dir_parent_obj):
 
 
 def import_directory_child(child, dir_path, dir_parent_obj):
+    # Extra converter artifacts (sidecar ST for exported XML) must not be imported into CODESYS.
+    # Example: `Something.xml.st`
+    try:
+        if child.lower().endswith(".xml.st"):
+            return
+    except Exception:
+        pass
+
     full_path = os.path.join(dir_path, child)
     filename, ext = os.path.splitext(child)
 
