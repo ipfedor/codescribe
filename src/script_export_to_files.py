@@ -8,6 +8,7 @@ import shutil
 import scriptengine  # type: ignore
 
 from communication_import_export import export_communication
+from device_tree_import_export import export_device_tree_siblings
 from entrypoint import find_application, find_communication, get_device_entrypoints, get_src_folder
 from import_export import OBJECT_TYPE_TO_EXPORT_FUNCTION, write_native
 from object_type import ObjectType, get_object_type
@@ -66,8 +67,16 @@ try:
         communication = find_communication(device_obj)
         if communication is not None:
             export_communication(communication, device_folder)
-        else:
-            print("Warning: No Communication object found for device " + device_obj.get_name())
+
+        device_tree_exported = export_device_tree_siblings(
+            device_obj, device_folder, application, communication
+        )
+
+        if communication is None and not device_tree_exported:
+            print(
+                "Warning: No Communication object and no exportable device-tree siblings "
+                "(Ethernet/Modbus/...) for device " + device_obj.get_name()
+            )
 
     # Дополнительная обработка XML (если подключён внешний конвертер).
     # Важно: запускать после того, как все XML уже записаны на диск.

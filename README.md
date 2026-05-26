@@ -53,9 +53,16 @@ To generate a project from a template file, you need two things: the `<project_n
 
 ## Exporting and Importing Communication Devices
 
-Exporting communication devices has been hardcoded to create folders for top-level devices under `Communication`. Any devices under these top-level devices will be exported using native CODESYS xml. This is done because the top-level devices can not be removed from the CODESYS project.
+Two layouts are supported:
 
-**If this functionality is causing you problems, it can be disabled by adding a folder with the name `_NO_EXPORT` directly under `Communication`.** You can then still rely on your project template to carry your communication configurations.
+1. **IFM-style `Communication` node** — top-level devices under `Communication` are exported to `Device/communication/<name>/` (children only, as before).
+2. **Device tree siblings of PLC Logic** — Ethernet, Modbus, and other fieldbus devices that sit next to `Plc Logic` / `Application` under the PLC device are exported to `Device/devices/<name>.xml` (native recursive export of the whole subtree).
+
+The Application branch (POUs, GVLs, etc.) is still exported only from `Device/application/`.
+
+**To disable fieldbus export for a project**, add a folder named `_NO_EXPORT` as a direct child of the PLC device (same name as used under `Communication` for the legacy path).
+
+**Legacy `Communication`-only disable:** `_NO_EXPORT` directly under `Communication` still skips the IFM communication export only.
 
 ## Status
 

@@ -74,5 +74,5 @@ def remove_tracked_communication_devices(communication_obj):
 
     # remove all children from top level devices
     for top_level_device in communication_obj.get_children():
-        for child in top_level_device.get_children():
+        for child in list(top_level_device.get_children()):
             child.remove()
