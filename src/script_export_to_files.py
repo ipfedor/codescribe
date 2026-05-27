@@ -2,8 +2,8 @@
 # REMEMBER: this is python 2.7
 from __future__ import print_function
 
+import gc
 import os
-import shutil
 
 import scriptengine  # type: ignore
 
@@ -41,18 +41,14 @@ try:
     assert_project_open()
 
     src_folder = get_src_folder(scriptengine.projects.primary)
-    safe_print("Writing to: " + src_folder)
-
-    # Безопасное удаление и создание папки
-    src_folder_bytes = ensure_unicode_path(src_folder)
-    if os.path.exists(src_folder_bytes):
-        shutil.rmtree(src_folder_bytes)
-    os.mkdir(src_folder_bytes)
+    staging_folder = begin_export_folder(src_folder)
+    safe_print("Writing to: " + staging_folder)
 
     for device_obj in get_device_entrypoints(scriptengine.projects.primary):
         device_name = device_obj.get_name()
+        safe_print(u"Device: " + device_name)
         # device_name может быть unicode
-        device_folder = os.path.join(src_folder, device_name)
+        device_folder = os.path.join(staging_folder, device_name)
         device_folder_bytes = ensure_unicode_path(device_folder)
         os.mkdir(device_folder_bytes)
 
@@ -62,7 +58,9 @@ try:
         os.mkdir(application_folder_bytes)
 
         for child_obj in application.get_children():
+            safe_print(u"  Exporting: " + child_obj.get_name())
             export_child(child_obj, application, application_folder)
+            gc.collect()
 
         communication = find_communication(device_obj)
         if communication is not None:
@@ -80,7 +78,12 @@ try:
 
     # Дополнительная обработка XML (если подключён внешний конвертер).
     # Важно: запускать после того, как все XML уже записаны на диск.
+    finalize_export_folder(src_folder, staging_folder)
+    gc.collect()
     try_run_codesys_export_converter(src_folder)
+    safe_print("Export folder: " + src_folder)
+except ExportFolderLockedError:
+    raise
 except Exception as e:
     # Безопасный вывод исключения
     try:

@@ -2,6 +2,7 @@
 # REMEMBER: this is python 2.7
 from __future__ import print_function
 
+import gc
 import os
 import shutil
 import sys
@@ -117,14 +118,9 @@ try:
     print_python_version()
     assert_project_open()
 
-    src_folder = get_src_folder(scriptengine.projects.primary)
-    src_folder = ensure_unicode_path(src_folder)
-    safe_print(u"Writing to: " + src_folder)
-
-    # Безопасное удаление и создание корневой папки
-    if os.path.exists(src_folder):
-        shutil.rmtree(src_folder)
-    os.mkdir(src_folder)
+    src_folder = ensure_unicode_path(get_src_folder(scriptengine.projects.primary))
+    staging_folder = begin_export_folder(src_folder)
+    safe_print(u"Writing to: " + staging_folder)
 
     project = scriptengine.projects.primary
     top_level_objs = project.get_children()
@@ -135,17 +131,21 @@ try:
 
         obj_type = get_object_type(obj)
         if obj_type == ObjectType.FOLDER:
-            export_folder(obj, src_folder)
+            export_folder(obj, staging_folder)
         else:
-            export_library_object(obj, src_folder)
+            export_library_object(obj, staging_folder)
             for child in obj.get_children():
-                export_child(child, obj, src_folder)
+                export_child(child, obj, staging_folder)
 
     # Дополнительная обработка XML (если подключён внешний конвертер).
     # Важно: запускать после того, как все XML уже записаны на диск.
+    finalize_export_folder(src_folder, staging_folder)
+    gc.collect()
     try_run_codesys_export_converter(src_folder)
-
+    safe_print(u"Export folder: " + src_folder)
     safe_print("Done!")
+except ExportFolderLockedError:
+    raise
 except Exception as e:
     safe_print("ERROR: " + str(e))
     raise e

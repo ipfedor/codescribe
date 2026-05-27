@@ -35,45 +35,53 @@ def import_st_decl_only(f, obj):
     obj.textual_declaration.replace(content.strip() + u"\n")
 
 
+_TIMESTAMP_LINE_RE = re.compile(
+    ur'^(?P<prefix>.+<Single Name="(?:Timestamp)" Type="long">).+(?P<suffix></Single>)$',
+    re.MULTILINE,
+)
+
+
+def _normalize_export_timestamps(path_bytes):
+    try:
+        size = os.path.getsize(path_bytes)
+    except OSError:
+        return
+
+    # Very large native exports: skip post-processing to limit peak memory in CodeSYS.
+    if size > 8 * 1024 * 1024:
+        return
+
+    if size > 512 * 1024:
+        tmp_path = path_bytes + u".codescribe_ts_tmp"
+        with io.open(path_bytes, "r", encoding="utf-8") as src:
+            with io.open(tmp_path, "w", encoding="utf-8") as dst:
+                for line in src:
+                    m = _TIMESTAMP_LINE_RE.match(line.rstrip(u"\r\n"))
+                    if m:
+                        dst.write(m.group("prefix") + u"0" + m.group("suffix") + u"\n")
+                    else:
+                        dst.write(line)
+        os.remove(path_bytes)
+        os.rename(tmp_path, path_bytes)
+        return
+
+    with io.open(path_bytes, "r+", encoding="utf-8") as f:
+        lines = f.read()
+        timestamp_replaced = _TIMESTAMP_LINE_RE.sub(
+            lambda m: m.group("prefix") + u"0" + m.group("suffix"),
+            lines,
+        )
+        f.seek(0)
+        f.write(timestamp_replaced)
+        f.truncate()
+
+
 def write_native(obj, path, recursive=False):
     # path может быть байтовой строкой или unicode; для export_native нужно передать str в Python 2.7?
     # obj.export_native ожидает, вероятно, байтовую строку. Преобразуем в bytes.
     path_bytes = ensure_unicode_path(path)
     obj.export_native(path_bytes, recursive=recursive)
-
-    # используем io.open для чтения/записи UTF-8
-    with io.open(path_bytes, "r+", encoding='utf-8') as f:
-        lines = f.read()
-
-        # XXX: Warning! Overwriting Id's broke visualisations
-        # It's probably a bad idea to overwrite Id's and UUIDs, even if it is annoying to have them show up in the diff
-        # Stick to just overwriting timestamps for now
-
-        # uuid_replaced = re.sub(
-        #     r'(^.+<Single Name="(?:EventPOUGuid|ParentSVNodeGuid|ParentGuid|LmGuid|LmStructTypeGuid|LmArrayTypeGuid|IoConfigGlobalsGuid|IoConfigGLobalsMappingGuid|IoConfigVarConfigGuid|IoConfigErrorPouGuid)".+?>).+(<\/Single>$)',
-        #     r"\g<1>00000000-0000-0000-0000-000000000000\g<2>",
-        #     lines,
-        #     flags=re.MULTILINE,
-        # )
-
-        # match any tags with Timestamp or Id and replace their contents with "0"
-        # timestamp_replaced = re.sub(
-        #     r'(^.+<Single Name="(?:Timestamp|Id)" Type="long">).+(<\/Single>$)',
-        #     r"\g<1>0\g<2>",
-        #     lines,
-        #     flags=re.MULTILINE,
-        # )
-
-        timestamp_replaced = re.sub(
-            ur'(^.+<Single Name="(?:Timestamp)" Type="long">).+(<\/Single>$)',
-            ur"\g<1>0\g<2>",
-            lines,
-            flags=re.MULTILINE,
-        )
-
-        f.seek(0)
-        f.write(timestamp_replaced)
-        f.truncate()
+    _normalize_export_timestamps(path_bytes)
 
 
 def read_native(f, obj):
@@ -124,10 +132,18 @@ def import_pou_st(child, dir_path, dir_parent_obj, import_dir_fn):
         import_st(f, pou_obj)
 
 
+def find_gvl_or_error(parent_obj, name, err):
+    for gvl_type in (ObjectType.GVL, ObjectType.GVL_PERSISTENT):
+        found = first_of_type_or_none(parent_obj.find(name), gvl_type)
+        if found is not None:
+            return found
+    raise ValueError(err)
+
+
 def export_gvl(child_obj, parent_obj, parent_folder_path, export_child_fn):
     """
     Exports native xml and structured text representation.
-    This is because we need to support EVL and NVL as well, using this function.
+    This is because we need to support EVL, NVL and persistent GVL as well, using this function.
     """
     write_native(child_obj, os.path.join(parent_folder_path, child_obj.get_name() + u".gvl.xml"), recursive=False)
     file_path = os.path.join(parent_folder_path, child_obj.get_name() + u".gvl.st")
@@ -154,8 +170,10 @@ def import_gvl(child, dir_path, dir_parent_obj, import_dir_fn):
     gvl_xml_path_bytes = ensure_unicode_path(gvl_xml_path)
     if os.path.exists(gvl_xml_path_bytes):
         import_native(gvl_xml_path, dir_path, dir_parent_obj, import_dir_fn)  # import_native ожидает путь
-        imported_obj = first_of_type_or_error(
-            dir_parent_obj.find(name), ObjectType.GVL, name + u" GVL should have been created, but cannot be found"
+        imported_obj = find_gvl_or_error(
+            dir_parent_obj,
+            name,
+            name + u" GVL should have been created, but cannot be found",
         )
     else:
         imported_obj = dir_parent_obj.create_gvl(name)
@@ -251,6 +269,7 @@ OBJECT_TYPE_TO_EXPORT_FUNCTION = {
     ObjectType.FOLDER: export_folder,
     ObjectType.POU: export_pou,
     ObjectType.GVL: export_gvl,  # EVL, NVL are "special types" of GVL which show up with the same UUID
+    ObjectType.GVL_PERSISTENT: export_gvl,  # e.g. PersistentVars (RETAIN)
     ObjectType.EVC: export_native,
     ObjectType.VISUALISATION: export_native,
     ObjectType.TASK_CONFIGURATION: export_native_recursive,

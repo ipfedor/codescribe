@@ -64,6 +64,16 @@ The Application branch (POUs, GVLs, etc.) is still exported only from `Device/ap
 
 **Legacy `Communication`-only disable:** `_NO_EXPORT` directly under `Communication` still skips the IFM communication export only.
 
+## Export folder locked (Windows)
+
+`Export To Files` writes into a staging folder next to the project (`<project_name>.codescribe_export_staging`), then replaces `<project_name>/`. If the target folder is open in Explorer, another IDE, git, or antivirus, replacement may fail — the export is still complete in the staging folder and the script prints its path. Close the lock, then re-run export or rename the staging folder manually.
+
+## Out of memory in CodeSYS
+
+Large exports no longer delete hundreds of files up front (`rmtree`); old folders are **renamed aside** (`.codescribe_discard_*`, `.codescribe_backup_*`) and can be removed later in Explorer.
+
+If `System.OutOfMemoryException` persists: close other projects, restart CodeSYS, set user env `CODESCRIBE_SKIP_XML_CONVERTER=1` and run `codesys_export_to_st.py` manually in a shell after export. The export log prints each object name (`Device:`, `Exporting:`) so you can see where it stopped.
+
 ## Status
 
 CODESCRIBE has been tested only on CODESYS V3.5 SP11, using the project structure supplied by the IFM CR711s packages.
