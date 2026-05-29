@@ -174,6 +174,38 @@ def _export_locked_message(target, staging, err):
     )
 
 
+def _copy_file(src, dst):
+    # Copy with overwrite. Keep simple to reduce memory pressure.
+    src = ensure_unicode_path(src)
+    dst = ensure_unicode_path(dst)
+    parent = os.path.dirname(dst)
+    if parent and (not os.path.exists(parent)):
+        os.makedirs(parent)
+    with open(src, "rb") as rf:
+        with open(dst, "wb") as wf:
+            while True:
+                chunk = rf.read(1024 * 1024)
+                if not chunk:
+                    break
+                wf.write(chunk)
+
+
+def _sync_tree_overwrite(src_root, dst_root):
+    """
+    Best-effort sync: overwrite/create files from src_root into dst_root.
+    Does NOT delete files that disappeared from src_root.
+    """
+    src_root = ensure_unicode_path(src_root)
+    dst_root = ensure_unicode_path(dst_root)
+    for root, _dirs, files in os.walk(src_root):
+        rel = os.path.relpath(root, src_root)
+        dst_dir = dst_root if rel == "." else os.path.join(dst_root, rel)
+        if not os.path.exists(dst_dir):
+            os.makedirs(dst_dir)
+        for fn in files:
+            _copy_file(os.path.join(root, fn), os.path.join(dst_dir, fn))
+
+
 def finalize_export_folder(target_folder, staging_folder):
     """Move a finished staging export into the target folder."""
     target = ensure_unicode_path(target_folder)
@@ -182,13 +214,33 @@ def finalize_export_folder(target_folder, staging_folder):
         raise ValueError(u"Staging export folder does not exist: " + staging)
     if os.path.exists(target):
         try:
-            _rename_aside_existing_dir(target, EXPORT_BACKUP_PREFIX, allow_rmtree_fallback=False)
+            _rename_aside_existing_dir(
+                target, EXPORT_BACKUP_PREFIX, allow_rmtree_fallback=False
+            )
         except (OSError, IOError) as e:
-            raise ExportFolderLockedError(_export_locked_message(target, staging, e))
+            # Target folder is likely locked. Fallback: sync files into it.
+            try:
+                safe_print(u"Warning: target locked, attempting file sync overwrite")
+                _sync_tree_overwrite(staging, target)
+                safe_print(u"Export synced into locked target: " + target)
+                return
+            except Exception:
+                raise ExportFolderLockedError(_export_locked_message(target, staging, e))
+
     try:
         os.rename(staging, target)
+        return
     except (OSError, IOError) as e:
-        raise ExportFolderLockedError(_export_locked_message(target, staging, e))
+        # Rename denied can still allow file writes (Explorer open, indexers, etc.)
+        try:
+            safe_print(u"Warning: rename failed, attempting file sync overwrite")
+            if not os.path.exists(target):
+                os.makedirs(target)
+            _sync_tree_overwrite(staging, target)
+            safe_print(u"Export synced into target: " + target)
+            return
+        except Exception:
+            raise ExportFolderLockedError(_export_locked_message(target, staging, e))
 
 
 def _find_codesys_export_converter_script():
