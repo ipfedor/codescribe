@@ -188,6 +188,14 @@ def export_native(child_obj, parent_obj, parent_folder_path, export_child_fn):
     write_native(child_obj, os.path.join(parent_folder_path, child_obj.get_name() + u".xml"), recursive=False)
 
 
+def export_visualisation(child_obj, parent_obj, parent_folder_path, export_child_fn):
+    """
+    Visualisations often share names with POUs (e.g. Main program + Main visualisation).
+    Use a dedicated suffix to avoid overwriting `Name.xml` from other object types.
+    """
+    write_native(child_obj, os.path.join(parent_folder_path, child_obj.get_name() + u".vis.xml"), recursive=False)
+
+
 def export_native_recursive(child_obj, parent_obj, parent_folder_path, export_child_fn):
     write_native(child_obj, os.path.join(parent_folder_path, child_obj.get_name() + u".xml"), recursive=True)
 
@@ -271,7 +279,7 @@ OBJECT_TYPE_TO_EXPORT_FUNCTION = {
     ObjectType.GVL: export_gvl,  # EVL, NVL are "special types" of GVL which show up with the same UUID
     ObjectType.GVL_PERSISTENT: export_gvl,  # e.g. PersistentVars (RETAIN)
     ObjectType.EVC: export_native,
-    ObjectType.VISUALISATION: export_native,
+    ObjectType.VISUALISATION: export_visualisation,
     ObjectType.TASK_CONFIGURATION: export_native_recursive,
     ObjectType.DUT: export_dut,
     ObjectType.METHOD: export_method,

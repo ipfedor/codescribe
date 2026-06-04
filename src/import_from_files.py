@@ -47,6 +47,9 @@ def import_directory_child(child, dir_path, dir_parent_obj):
             pass
         if ext == ".st":
             import_gvl(child, dir_path, dir_parent_obj, import_directory)
+    elif filename.endswith(".vis"):
+        if ext == ".xml":
+            import_native(child, dir_path, dir_parent_obj, import_directory)
     elif "." in filename:
         # . means some sort of sub POU
         if ext == ".xml":
