@@ -8,7 +8,7 @@ def get_src_folder(project):
     working_dir = os.path.dirname(project.path)
     project_name, project_extension = os.path.splitext(os.path.basename(project.path))
     src_folder = os.path.join(working_dir, project_name)
-    return src_folder
+    return ensure_unicode_path(src_folder)
 
 
 def get_device_entrypoints(project):

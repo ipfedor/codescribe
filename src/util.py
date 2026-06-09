@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
+import io
 import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 import scriptengine  # type: ignore
@@ -77,11 +79,72 @@ def fix_encoding(name):
         # Если не получилось, возвращаем как есть
         return name.decode('utf-8', errors='replace')
 
+def _try_utf8_mojibake_unicode(text):
+    """UTF-8 байты, ошибочно прочитанные как Latin-1 (типичный вывод CODESYS в лог)."""
+    if not isinstance(text, unicode):
+        return text
+    try:
+        return text.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+
+def _to_unicode_path(path):
+    if isinstance(path, unicode):
+        return path
+    if isinstance(path, str):
+        try:
+            return path.decode("mbcs")
+        except UnicodeDecodeError:
+            pass
+        return fix_encoding(path)
+    return path
+
+
+def resolve_export_folder(path):
+    """
+    Возвращает путь к папке экспорта так, как она реально существует на диске.
+    Исправляет mojibake и расхождение unicode/str из project.path.
+    """
+    path = _to_unicode_path(path)
+    if os.path.isdir(path):
+        return path
+
+    fixed = _try_utf8_mojibake_unicode(path)
+    if fixed != path and os.path.isdir(fixed):
+        return fixed
+
+    parent = os.path.dirname(path)
+    base = os.path.basename(path)
+    if not os.path.isdir(parent):
+        return path
+
+    try:
+        entries = os.listdir(parent)
+    except Exception:
+        return path
+
+    if base in entries and os.path.isdir(os.path.join(parent, base)):
+        return os.path.join(parent, base)
+
+    fixed_base = _try_utf8_mojibake_unicode(base)
+    candidate = os.path.join(parent, fixed_base)
+    if os.path.isdir(candidate):
+        return candidate
+
+    for name in entries:
+        full = os.path.join(parent, name)
+        if not os.path.isdir(full):
+            continue
+        if _try_utf8_mojibake_unicode(name) == fixed_base or name == fixed_base:
+            return full
+
+    return path
+
+
 def ensure_unicode_path(path):
     """Преобразует байтовый путь в unicode с исправлением кодировки"""
-    if isinstance(path, str) and not isinstance(path, unicode):
-        path = fix_encoding(path)
-    return path
+    return resolve_export_folder(path)
 
 
 EXPORT_STAGING_SUFFIX = u".codescribe_export_staging"
@@ -243,29 +306,97 @@ def finalize_export_folder(target_folder, staging_folder):
             raise ExportFolderLockedError(_export_locked_message(target, staging, e))
 
 
-def _find_codesys_export_converter_script():
+def _codescribe_repo_roots():
     """
-    Возвращает путь до `codesys_export_to_st.py`, если репозиторий/модуль подключён рядом с codescribe.
-    Если не найден — возвращает None.
+    Корни репозитория codescribe. realpath нужен, когда CODESYS запускает скрипт
+    через symlink в Program Files (abspath остаётся в C:\\Program Files\\...).
     """
-    # `.../codescribe/src/util.py` -> repo root `.../codescribe`
     here = os.path.dirname(os.path.abspath(__file__))
-    repo_root = os.path.dirname(here)
+    roots = []
+    for candidate in (os.path.dirname(here),):
+        if candidate and candidate not in roots:
+            roots.append(candidate)
+    try:
+        real_here = os.path.dirname(os.path.realpath(__file__))
+        real_root = os.path.dirname(real_here)
+        if real_root and real_root not in roots:
+            roots.append(real_root)
+    except Exception:
+        pass
+    return roots
 
-    candidates = [
+
+def _read_converter_path_file(repo_root):
+    path_file = os.path.join(repo_root, "converter.path")
+    if not os.path.isfile(path_file):
+        return None
+    try:
+        with io.open(path_file, "r", encoding="utf-8") as f:
+            line = f.read().strip()
+        if line and os.path.isfile(line):
+            return ensure_unicode_path(line)
+    except Exception:
+        pass
+    return None
+
+
+def _converter_script_candidates(repo_root):
+    return [
         os.path.normpath(os.path.join(repo_root, "..", "codesys-export-converter", "codesys_export_to_st.py")),
         os.path.normpath(os.path.join(repo_root, "codesys-export-converter", "codesys_export_to_st.py")),
         os.path.normpath(os.path.join(repo_root, "vendor", "codesys-export-converter", "codesys_export_to_st.py")),
         os.path.normpath(os.path.join(repo_root, "external", "codesys-export-converter", "codesys_export_to_st.py")),
     ]
 
-    for p in candidates:
+
+def _find_codesys_export_converter_script():
+    """
+    Возвращает путь до `codesys_export_to_st.py`, если репозиторий/модуль подключён рядом с codescribe.
+    Если не найден — возвращает None.
+    """
+    env_script = os.environ.get("CODESCRIBE_CONVERTER_SCRIPT", "").strip()
+    if env_script:
         try:
-            if os.path.exists(p):
-                return ensure_unicode_path(p)
+            if os.path.isfile(env_script):
+                return ensure_unicode_path(env_script)
+        except Exception:
+            pass
+
+    for repo_root in _codescribe_repo_roots():
+        from_file = _read_converter_path_file(repo_root)
+        if from_file is not None:
+            return from_file
+
+        for p in _converter_script_candidates(repo_root):
+            try:
+                if os.path.exists(p):
+                    return ensure_unicode_path(p)
+            except Exception:
+                pass
+    return None
+
+
+def _find_converter_launcher_cmd():
+    for repo_root in _codescribe_repo_roots():
+        bat = os.path.join(repo_root, "run_xml_converter.cmd")
+        try:
+            if os.path.isfile(bat):
+                return ensure_unicode_path(bat)
         except Exception:
             pass
     return None
+
+
+def _converter_diag_log_path(xml_root_folder):
+    return os.path.join(ensure_unicode_path(xml_root_folder), u".codescribe-converter.log")
+
+
+def _converter_diag_log(xml_root_folder, msg):
+    try:
+        with io.open(_converter_diag_log_path(xml_root_folder), "a", encoding="utf-8") as f:
+            f.write(ensure_unicode_path(msg) + u"\n")
+    except Exception:
+        pass
 
 
 def _argv_for_subprocess(argv):
@@ -295,17 +426,50 @@ def _cmdline_for_shell(argv):
     return " ".join(parts)
 
 
-def _run_external_command(argv):
+def _subprocess_env():
+    """PATH у GUI-приложений (CODESYS) часто урезан — добавляем типичные пути Python."""
+    env = dict(os.environ)
+    extra = []
+    windir = env.get("WINDIR", r"C:\Windows")
+    extra.append(windir)
+    for env_name in ("LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"):
+        base = env.get(env_name)
+        if not base:
+            continue
+        py_root = os.path.join(base, "Programs", "Python")
+        if os.path.isdir(py_root):
+            try:
+                for ver in os.listdir(py_root):
+                    extra.append(os.path.join(py_root, ver))
+                    extra.append(os.path.join(py_root, ver, "Scripts"))
+            except Exception:
+                pass
+    path = env.get("PATH", "")
+    env["PATH"] = os.pathsep.join(extra) + os.pathsep + path
+    return env
+
+
+def _run_external_command(argv, use_shell=False, via_cmd=False):
     """
     Run a child process from CodeSYS (Py2.7). Tries argv list first, then shell fallback.
+  via_cmd: запуск .cmd через cmd.exe /c (надёжнее, чем shell=True из IronPython).
     """
+    env = _subprocess_env()
+    if via_cmd:
+        comspec = env.get("COMSPEC", r"C:\Windows\System32\cmd.exe")
+        cmd_argv = [comspec, "/c"] + list(argv)
+        argv_bytes = _argv_for_subprocess(cmd_argv)
+        return subprocess.call(argv_bytes, shell=False, env=env)
+
     argv_bytes = _argv_for_subprocess(argv)
+    if use_shell:
+        return subprocess.call(_cmdline_for_shell(argv), shell=True, env=env)
     try:
-        return subprocess.call(argv_bytes)
+        return subprocess.call(argv_bytes, shell=False, env=env)
     except (OSError, IOError) as e:
         if getattr(e, "errno", None) != 22:
             raise
-    return subprocess.call(_cmdline_for_shell(argv), shell=True)
+    return subprocess.call(_cmdline_for_shell(argv), shell=True, env=env)
 
 
 def _discover_python3_executables():
@@ -341,19 +505,58 @@ def _discover_python3_executables():
     return found
 
 
-def _converter_command_candidates(script_path, xml_root_folder):
-    tail = [script_path, xml_root_folder, "--inplace", "--dst-suffix", ".xml.st"]
-    prefixes = [
-        ["py", "-3"],
-        ["python3"],
-        ["python"],
-    ]
+def _ascii_safe_dir_for_temp(path):
+    """
+    Каталог без не-ASCII символов для sidecar-файла, который уходит в subprocess.
+    TEMP (c:\\users\\программер\\...) ломает argv из IronPython.
+    """
+    path = _to_unicode_path(path)
+    probe = path
+    while probe and probe != os.path.dirname(probe):
+        try:
+            probe.encode("ascii")
+            if os.path.isdir(probe):
+                return probe
+        except UnicodeEncodeError:
+            pass
+        probe = os.path.dirname(probe)
+    windir = os.environ.get("WINDIR", r"C:\Windows")
+    try:
+        windir.encode("ascii")
+        return windir
+    except UnicodeEncodeError:
+        return tempfile.gettempdir()
+
+
+def _write_converter_input_path_file(folder_path):
+    """
+    Записывает unicode-путь экспорта в UTF-8 sidecar-файл.
+    Сам файл кладём в ближайший ASCII-каталог (обычно D:\\projects\\...).
+    """
+    folder_path = ensure_unicode_path(folder_path)
+    anchor = _ascii_safe_dir_for_temp(folder_path)
+    fd, path = tempfile.mkstemp(suffix=".path", prefix="codescribe_xml_in_", dir=anchor)
+    os.close(fd)
+    with io.open(path, "w", encoding="utf-8") as f:
+        f.write(folder_path)
+    return path
+
+
+def _converter_command_candidates(script_path, input_path_file, launcher_cmd=None):
+    if script_path is None:
+        if launcher_cmd is not None:
+            yield [launcher_cmd, input_path_file], "cmd"
+        return
+
+    tail = [script_path, "--input-path-file", input_path_file, "--inplace", "--dst-suffix", ".xml.st"]
+    prefixes = []
     for exe in _discover_python3_executables():
         exe_l = exe.lower()
         if exe_l.endswith(os.path.sep + "py.exe"):
             prefixes.append([exe, "-3"])
         else:
             prefixes.append([exe])
+    prefixes.extend([["py", "-3"], ["python3"], ["python"]])
 
     seen = set()
     for prefix in prefixes:
@@ -361,7 +564,33 @@ def _converter_command_candidates(script_path, xml_root_folder):
         if key in seen:
             continue
         seen.add(key)
-        yield prefix + tail
+        yield prefix + tail, "exe"
+
+    if launcher_cmd is not None:
+        yield [launcher_cmd, input_path_file], "cmd"
+
+
+def _converter_output_log_path(xml_root_folder):
+    return os.path.join(ensure_unicode_path(xml_root_folder), u".codesys-export-converter.log")
+
+
+def _verify_converter_output(xml_root_folder):
+    log_path = _converter_output_log_path(xml_root_folder)
+    if not os.path.isfile(log_path):
+        return False, u"missing .codesys-export-converter.log (converter did not run)"
+
+    xml_st_count = 0
+    try:
+        for dp, _, files in os.walk(xml_root_folder):
+            for fn in files:
+                if fn.lower().endswith(u".xml.st"):
+                    xml_st_count += 1
+    except Exception as e:
+        return False, u"walk failed: " + unicode(e)
+
+    if xml_st_count < 1:
+        return False, u"no .xml.st files produced"
+    return True, u"xml.st count: " + unicode(xml_st_count)
 
 
 def try_run_codesys_export_converter(xml_root_folder):
@@ -369,32 +598,79 @@ def try_run_codesys_export_converter(xml_root_folder):
     Пытается запустить внешний конвертер XML->ST (Python 3) по папке экспорта.
     Если репозиторий конвертера не подключён/не найден — ничего не делает.
     """
+    xml_root_folder = ensure_unicode_path(xml_root_folder)
+    try:
+        with io.open(_converter_diag_log_path(xml_root_folder), "w", encoding="utf-8") as f:
+            f.write(u"codescribe XML converter log\n")
+    except Exception:
+        pass
+
     if os.environ.get("CODESCRIBE_SKIP_XML_CONVERTER", "").strip().lower() in ("1", "true", "yes"):
-        safe_print(u"Info: XML converter skipped (CODESCRIBE_SKIP_XML_CONVERTER is set)")
+        msg = u"Info: XML converter skipped (CODESCRIBE_SKIP_XML_CONVERTER is set)"
+        safe_print(msg)
+        _converter_diag_log(xml_root_folder, msg)
         return
 
     script_path = _find_codesys_export_converter_script()
-    if script_path is None:
-        safe_print(u"Info: codesys-export-converter not connected; skipping extra XML processing")
+    launcher_cmd = _find_converter_launcher_cmd()
+    if script_path is None and launcher_cmd is None:
+        msg = u"Info: codesys-export-converter not connected; skipping extra XML processing"
+        safe_print(msg)
+        _converter_diag_log(xml_root_folder, msg)
+        _converter_diag_log(xml_root_folder, u"repo roots: " + u", ".join(_codescribe_repo_roots()))
         return
 
-    xml_root_folder = ensure_unicode_path(xml_root_folder)
+    _converter_diag_log(xml_root_folder, u"export folder: " + xml_root_folder)
+    if script_path is not None:
+        _converter_diag_log(xml_root_folder, u"converter script: " + script_path)
+    if launcher_cmd is not None:
+        _converter_diag_log(xml_root_folder, u"launcher cmd: " + launcher_cmd)
 
-    for cmd in _converter_command_candidates(script_path, xml_root_folder):
-        try:
-            safe_print(u"Running extra XML converter: " + u" ".join([unicode(c) for c in cmd]))
-            rc = _run_external_command(cmd)
-            if rc == 0:
-                safe_print(u"Extra XML conversion done")
-                return
-            safe_print(u"Warning: converter returned non-zero code: " + unicode(rc))
-        except Exception as e:
+    input_path_file = None
+    try:
+        input_path_file = _write_converter_input_path_file(xml_root_folder)
+        _converter_diag_log(xml_root_folder, u"input path file: " + ensure_unicode_path(input_path_file))
+
+        for cmd, launch_mode in _converter_command_candidates(script_path, input_path_file, launcher_cmd):
             try:
-                safe_print(u"Warning: failed to run converter: " + unicode(e))
+                cmd_line = u" ".join([unicode(c) for c in cmd])
+                safe_print(u"Running extra XML converter: " + cmd_line)
+                _converter_diag_log(xml_root_folder, u"RUN: " + cmd_line)
+                if launch_mode == "cmd":
+                    rc = _run_external_command(cmd, via_cmd=True)
+                else:
+                    rc = _run_external_command(cmd, use_shell=False)
+                    if rc != 0:
+                        _converter_diag_log(xml_root_folder, u"retry via shell")
+                        rc = _run_external_command(cmd, use_shell=True)
+                _converter_diag_log(xml_root_folder, u"exit code: " + unicode(rc))
+                if rc != 0:
+                    safe_print(u"Warning: converter returned non-zero code: " + unicode(rc))
+                    continue
+                ok, detail = _verify_converter_output(xml_root_folder)
+                _converter_diag_log(xml_root_folder, detail)
+                if ok:
+                    safe_print(u"Extra XML conversion done (" + detail + u")")
+                    _converter_diag_log(xml_root_folder, u"OK")
+                    return
+                safe_print(u"Warning: converter reported success but " + detail)
+                _converter_diag_log(xml_root_folder, u"VERIFY FAILED: " + detail)
+            except Exception as e:
+                try:
+                    err = unicode(e)
+                except Exception:
+                    err = u"unknown error"
+                safe_print(u"Warning: failed to run converter: " + err)
+                _converter_diag_log(xml_root_folder, u"ERROR: " + err)
+    finally:
+        if input_path_file:
+            try:
+                os.remove(input_path_file)
             except Exception:
-                safe_print(u"Warning: failed to run converter")
+                pass
 
     safe_print(
         u"Warning: could not run codesys-export-converter. "
-        u"Install Python 3 (py -3) or run manually:\n  py -3 \"" + script_path + u"\" \"" + xml_root_folder + u"\" --inplace --dst-suffix .xml.st"
+        u"See .codescribe-converter.log in the export folder."
     )
+    _converter_diag_log(xml_root_folder, u"FAILED: all launch attempts exhausted")

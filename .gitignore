@@ -1,5 +1,8 @@
 .vscode/
 
+# Local path to codesys-export-converter (copy from converter.path.example)
+converter.path
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
