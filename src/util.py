@@ -574,6 +574,87 @@ def _converter_output_log_path(xml_root_folder):
     return os.path.join(ensure_unicode_path(xml_root_folder), u".codesys-export-converter.log")
 
 
+def _is_xs_studio_host():
+    """
+    XS Studio — OEM CODESYS; PDM Kaspersky часто блокирует subprocess из IDE.
+    """
+    try:
+        exe = sys.executable
+        if isinstance(exe, str) and not isinstance(exe, unicode):
+            try:
+                exe = exe.decode("mbcs")
+            except UnicodeDecodeError:
+                exe = exe.decode("utf-8", "replace")
+        if u"xs studio" in exe.lower():
+            return True
+    except Exception:
+        pass
+    try:
+        for root in _codescribe_repo_roots():
+            if u"xs studio" in root.lower():
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _should_skip_external_converter():
+    if os.environ.get("CODESCRIBE_SKIP_XML_CONVERTER", "").strip().lower() in ("1", "true", "yes"):
+        return True, u"CODESCRIBE_SKIP_XML_CONVERTER is set"
+    if os.environ.get("CODESCRIBE_FORCE_XML_CONVERTER", "").strip().lower() in ("1", "true", "yes"):
+        return False, u""
+    for root in _codescribe_repo_roots():
+        flag = os.path.join(root, u"skip_external_converter")
+        try:
+            if os.path.isfile(flag):
+                return True, u"skip_external_converter flag in " + root
+        except Exception:
+            pass
+    if _is_xs_studio_host():
+        return True, (
+            u"XS Studio host: external subprocess blocked by default "
+            u"(set CODESCRIBE_FORCE_XML_CONVERTER=1 to override)"
+        )
+    return False, u""
+
+
+def _write_manual_converter_launcher(xml_root_folder, script_path):
+    """
+    Создаёт RUN_XML_CONVERTER.cmd в папке экспорта — запускать вручную вне IDE.
+    """
+    xml_root_folder = ensure_unicode_path(xml_root_folder)
+    path_marker = os.path.join(xml_root_folder, u".codescribe_export_path.txt")
+    with io.open(path_marker, "w", encoding="utf-8") as f:
+        f.write(xml_root_folder)
+
+    bat_path = os.path.join(xml_root_folder, u"RUN_XML_CONVERTER.cmd")
+    script_path = ensure_unicode_path(script_path)
+    lines = [
+        u"@echo off",
+        u"setlocal",
+        u'cd /d "%~dp0"',
+        u'set "PF=%~dp0.codescribe_export_path.txt"',
+        u'if not exist "%PF%" (echo Missing .codescribe_export_path.txt & pause & exit /b 1)',
+    ]
+    if script_path:
+        lines.extend(
+            [
+                u'if exist "%WINDIR%\\py.exe" (',
+                u'  "%WINDIR%\\py.exe" -3 "' + script_path + u'" --input-path-file "%PF%" --inplace --dst-suffix .xml.st',
+                u"  goto :done",
+                u")",
+                u'python "' + script_path + u'" --input-path-file "%PF%" --inplace --dst-suffix .xml.st',
+                u":done",
+            ]
+        )
+    else:
+        lines.append(u"echo Converter script not found. Set converter.path in codescribe.")
+    lines.extend([u"echo.", u"pause"])
+    with io.open(bat_path, "w", encoding="utf-8") as f:
+        f.write(u"\r\n".join(lines) + u"\r\n")
+    return bat_path
+
+
 def _verify_converter_output(xml_root_folder):
     log_path = _converter_output_log_path(xml_root_folder)
     if not os.path.isfile(log_path):
@@ -605,14 +686,21 @@ def try_run_codesys_export_converter(xml_root_folder):
     except Exception:
         pass
 
-    if os.environ.get("CODESCRIBE_SKIP_XML_CONVERTER", "").strip().lower() in ("1", "true", "yes"):
-        msg = u"Info: XML converter skipped (CODESCRIBE_SKIP_XML_CONVERTER is set)"
-        safe_print(msg)
-        _converter_diag_log(xml_root_folder, msg)
-        return
-
+    skip_external, skip_reason = _should_skip_external_converter()
     script_path = _find_codesys_export_converter_script()
     launcher_cmd = _find_converter_launcher_cmd()
+
+    if skip_external:
+        msg = u"Info: external XML converter skipped — " + skip_reason
+        safe_print(msg)
+        _converter_diag_log(xml_root_folder, msg)
+        if script_path is not None:
+            bat = _write_manual_converter_launcher(xml_root_folder, script_path)
+            hint = u"Run manually outside XS Studio: " + bat
+            safe_print(hint)
+            _converter_diag_log(xml_root_folder, hint)
+        return
+
     if script_path is None and launcher_cmd is None:
         msg = u"Info: codesys-export-converter not connected; skipping extra XML processing"
         safe_print(msg)
