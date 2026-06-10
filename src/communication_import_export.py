@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
+import gc
 import os
 
 from import_export import write_native
@@ -38,6 +39,7 @@ def export_communication(communication_obj, device_folder):
             write_native(
                 child_device, export_path_bytes, recursive=True
             )
+            gc.collect()
 
 
 def import_communication(communication_obj, device_folder):

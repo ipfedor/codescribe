@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
+import gc
 import io
 import os
 import re
+import time
 
 from object_type import ObjectType, get_object_type
 from util import *
@@ -41,7 +43,7 @@ _TIMESTAMP_LINE_RE = re.compile(
 )
 
 
-def _normalize_export_timestamps(path_bytes):
+def _normalize_export_timestamps_once(path_bytes):
     try:
         size = os.path.getsize(path_bytes)
     except OSError:
@@ -51,36 +53,71 @@ def _normalize_export_timestamps(path_bytes):
     if size > 8 * 1024 * 1024:
         return
 
-    if size > 512 * 1024:
-        tmp_path = path_bytes + u".codescribe_ts_tmp"
-        with io.open(path_bytes, "r", encoding="utf-8") as src:
-            with io.open(tmp_path, "w", encoding="utf-8") as dst:
+    tmp_path = path_bytes + u".codescribe_ts_tmp"
+    with io.open(path_bytes, "r", encoding="utf-8") as src:
+        with io.open(tmp_path, "w", encoding="utf-8") as dst:
+            if size > 512 * 1024:
                 for line in src:
                     m = _TIMESTAMP_LINE_RE.match(line.rstrip(u"\r\n"))
                     if m:
                         dst.write(m.group("prefix") + u"0" + m.group("suffix") + u"\n")
                     else:
                         dst.write(line)
-        os.remove(path_bytes)
-        os.rename(tmp_path, path_bytes)
-        return
+            else:
+                lines = src.read()
+                dst.write(
+                    _TIMESTAMP_LINE_RE.sub(
+                        lambda m: m.group("prefix") + u"0" + m.group("suffix"),
+                        lines,
+                    )
+                )
+    os.remove(path_bytes)
+    os.rename(tmp_path, path_bytes)
 
-    with io.open(path_bytes, "r+", encoding="utf-8") as f:
-        lines = f.read()
-        timestamp_replaced = _TIMESTAMP_LINE_RE.sub(
-            lambda m: m.group("prefix") + u"0" + m.group("suffix"),
-            lines,
-        )
-        f.seek(0)
-        f.write(timestamp_replaced)
-        f.truncate()
+
+def _normalize_export_timestamps(path_bytes, retries=8, delay_sec=0.15):
+    path_bytes = ensure_unicode_path(path_bytes)
+    last_err = None
+    for attempt in range(retries):
+        try:
+            _normalize_export_timestamps_once(path_bytes)
+            return
+        except (IOError, OSError) as e:
+            last_err = e
+            if attempt + 1 < retries:
+                time.sleep(delay_sec)
+                gc.collect()
+    safe_print(
+        u"Warning: could not normalize timestamps for "
+        + path_bytes
+        + u": "
+        + unicode(last_err)
+    )
 
 
 def write_native(obj, path, recursive=False):
     # path может быть байтовой строкой или unicode; для export_native нужно передать str в Python 2.7?
     # obj.export_native ожидает, вероятно, байтовую строку. Преобразуем в bytes.
     path_bytes = ensure_unicode_path(path)
-    obj.export_native(path_bytes, recursive=recursive)
+    last_err = None
+    for attempt in range(8):
+        try:
+            if os.path.exists(path_bytes):
+                try:
+                    os.remove(path_bytes)
+                except (IOError, OSError):
+                    pass
+            obj.export_native(path_bytes, recursive=recursive)
+            break
+        except (IOError, OSError) as e:
+            last_err = e
+            if attempt + 1 < 8:
+                time.sleep(0.15)
+                gc.collect()
+            else:
+                raise
+    gc.collect()
+    time.sleep(0.05)
     _normalize_export_timestamps(path_bytes)
 
 

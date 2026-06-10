@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
+import gc
 import os
 
 from import_export import read_native, write_native
@@ -76,6 +77,7 @@ def export_device_tree_siblings(device_obj, device_folder, application, communic
         export_path = os.path.join(devices_folder, child_name + u".xml")
         export_path_bytes = ensure_unicode_path(export_path)
         write_native(child, export_path_bytes, recursive=True)
+        gc.collect()
 
     return True
 

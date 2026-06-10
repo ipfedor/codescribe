@@ -71,30 +71,76 @@ def find_repo_config_json(repo_path: Path) -> Path:
     return config_json
 
 
+def _looks_like_codesys_oem(name: str) -> bool:
+    upper = name.upper()
+    markers = (
+        "CODESYS",
+        "XS STUDIO",
+        "XSS STUDIO",
+        "XSSTUDIO",
+        "XCP",
+        "XINJE",
+        "信捷",
+    )
+    return any(marker in upper for marker in markers)
+
+
 def find_codesys_install_paths() -> list[Path]:
-    program_files = Path("C:/Program Files")
-    program_files_x86 = Path("C:/Program Files (x86)")
+    roots: list[Path] = []
+    seen: set[str] = set()
 
-    found_paths = []
+    def add(path: Path) -> None:
+        key = str(path).lower()
+        if key in seen:
+            return
+        if path.is_dir():
+            seen.add(key)
+            roots.append(path)
 
-    for prg_files_path in [program_files, program_files_x86]:
-        for child in prg_files_path.iterdir():
-            if child.is_dir() and "CODESYS" in child.name:
-                found_paths.append(child)
+    search_bases = [
+        Path("C:/Program Files"),
+        Path("C:/Program Files (x86)"),
+        Path("D:/Program Files"),
+    ]
+    for base in search_bases:
+        if not base.is_dir():
+            continue
+        try:
+            children = list(base.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if child.is_dir() and _looks_like_codesys_oem(child.name):
+                add(child)
 
-    return found_paths
+    return sorted(roots, key=lambda p: p.name.lower())
 
 
-def get_or_create_script_path(codesys_install_path: Path) -> Path:
-    codesys_path = codesys_install_path / "CODESYS"
-    if not codesys_path.exists() or not codesys_path.is_dir():
-        print_fail(f"ERROR: expected directory to exist: {codesys_path}")
+def resolve_codesys_root(install_root: Path) -> Path | None:
+    """
+    OEM-оболочки (CODESYS, XS Studio/xS Studio) обычно имеют подкаталог CODESYS.
+    Иногда корень установки уже является CODESYS-каталогом.
+    """
+    if (install_root / "Common" / "CODESYS.exe").is_file():
+        return install_root
+    codesys_path = install_root / "CODESYS"
+    if codesys_path.is_dir():
+        return codesys_path
+    if (install_root / "Script Commands").is_dir():
+        return install_root
+    return None
+
+
+def get_or_create_script_path(install_root: Path) -> Path:
+    codesys_path = resolve_codesys_root(install_root)
+    if codesys_path is None:
+        print_fail(f"ERROR: CODESYS/XS Studio layout not found under: {install_root}")
         exit(0)
 
     script_path = codesys_path / "Script Commands"
     if not script_path.exists():
         print_ok(f"Creating directory: {script_path}")
-        script_path.mkdir()
+        script_path.mkdir(parents=True)
 
     if not script_path.is_dir():
         print_fail(f"ERROR: expected to be a directory: {script_path}")
@@ -153,9 +199,9 @@ if __name__ == "__main__":
         install_paths = find_codesys_install_paths()
         install_path = select_option(
             install_paths,
-            none_msg="No CODESYS install paths found!",
-            one_msg="CODESYS install path found: {single_option}",
-            many_msg="{num_options} CODESYS install paths found:",
+            none_msg="No CODESYS / XS Studio install paths found!",
+            one_msg="IDE install path found: {single_option}",
+            many_msg="{num_options} IDE install paths found (CODESYS / XS Studio):",
         )
 
         script_path = get_or_create_script_path(install_path)
