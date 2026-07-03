@@ -327,8 +327,59 @@ OBJECT_TYPE_TO_EXPORT_FUNCTION = {
 }
 
 
-def remove_tracked_objects(obj_list):
+def collect_application_import_object_names(dir_path):
+    """
+    Top-level application object names that import_from_files will recreate.
+
+    Includes native-xml objects (e.g. DifferentialMonitor, Symbols) whose type
+    is not in OBJECT_TYPE_TO_EXPORT_FUNCTION and were therefore not removed
+    by the older import cleanup logic.
+    """
+    names = set()
+    for child in os.listdir(dir_path):
+        try:
+            if child.lower().endswith(u".xml.st"):
+                continue
+        except Exception:
+            pass
+
+        full_path = os.path.join(dir_path, child)
+        filename, ext = os.path.splitext(child)
+
+        if os.path.isdir(full_path):
+            names.add(child)
+            continue
+
+        if filename.endswith(u".gvl"):
+            if ext == u".st":
+                names.add(filename.replace(u".gvl", u""))
+            continue
+        if filename.endswith(u".vis"):
+            if ext == u".xml":
+                names.add(filename.replace(u".vis", u""))
+            continue
+        if u"." in filename:
+            # Parent.Child.xml / Parent.Method.st — sub-POU; parent is removed only
+            # when Parent.xml or Parent.st is present in the application folder.
+            continue
+        if ext == u".xml":
+            names.add(filename)
+        elif ext == u".st":
+            names.add(filename)
+    return names
+
+
+def remove_tracked_objects(obj_list, import_dir_path=None):
+    import_names = None
+    if import_dir_path is not None:
+        import_names = collect_application_import_object_names(import_dir_path)
+
     for obj in obj_list:
-        if get_object_type(obj) in OBJECT_TYPE_TO_EXPORT_FUNCTION:
-            safe_print(u"Removing " + obj.get_name())
+        name = obj.get_name()
+        obj_type = get_object_type(obj)
+        if obj_type in OBJECT_TYPE_TO_EXPORT_FUNCTION:
+            safe_print(u"Removing " + name)
+            obj.remove()
+        elif import_names is not None and name in import_names:
+            safe_print(u"Removing " + name)
             obj.remove()
