@@ -147,6 +147,18 @@ def import_folder(child, dir_path, dir_parent_obj, import_dir_fn):
     import_dir_fn(os.path.join(dir_path, child), folder_obj)
 
 
+def ensure_folder(dir_parent_obj, folder_name):
+    folder_obj = first_of_type_or_none(dir_parent_obj.find(folder_name), ObjectType.FOLDER)
+    if folder_obj is not None:
+        return folder_obj
+    dir_parent_obj.create_folder(folder_name)
+    return first_of_type_or_error(
+        dir_parent_obj.find(folder_name),
+        ObjectType.FOLDER,
+        u"Folder of name " + folder_name + u" should have been created, but cannot be found",
+    )
+
+
 def export_pou(child_obj, parent_obj, parent_folder_path, export_child_fn):
     if child_obj.has_textual_implementation:
         file_path = os.path.join(parent_folder_path, child_obj.get_name() + u".st")

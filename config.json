@@ -21,6 +21,13 @@
         "Params": []
     },
     {
+        "Name": "Import Changed From Files",
+        "Desc": "Import only git-changed files under application (vs HEAD).",
+        "Icon": "codescribe\\icons\\import_from_files.ico",
+        "Path": "codescribe\\src\\script_import_changed_from_files.py",
+        "Params": []
+    },
+    {
         "Name": "Save As Template",
         "Desc": "Save as template.",
         "Icon": "codescribe\\icons\\blank_folder.ico",

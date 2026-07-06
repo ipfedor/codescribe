@@ -82,6 +82,14 @@ To **skip LD/CFC** conversion only (opt-in): `CODESCRIBE_SKIP_LD_CFC_XS_STUDIO=1
 
 To **skip the entire subprocess** on XS Studio (e.g. Kaspersky PDM): `CODESCRIBE_SKIP_XML_CONVERTER_ON_XS_STUDIO=1` or flag file `skip_xml_converter_xs_studio`. A `RUN_XML_CONVERTER.cmd` is still written in the export folder for manual runs outside the IDE.
 
+## Import changed only (git)
+
+**Import Changed From Files** imports only files under `Device/application/` that differ from git `HEAD` (uncommitted + staged changes, new untracked files). Deleted files are removed from the project.
+
+Compare against another ref (e.g. remote main): set `CODESCRIBE_IMPORT_GIT_BASE=origin/main`.
+
+Requires a git repository containing the export folder. Use **Import From Files** for a full sync.
+
 ## Status
 
 CODESCRIBE has been tested only on CODESYS V3.5 SP11, using the project structure supplied by the IFM CR711s packages.
