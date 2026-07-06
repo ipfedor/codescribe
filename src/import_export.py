@@ -338,6 +338,118 @@ OBJECT_TYPE_TO_EXPORT_FUNCTION = {
     ObjectType.TRANSITION: export_sub_pou,
 }
 
+SUB_POU_MEMBER_TYPES = (
+    ObjectType.METHOD,
+    ObjectType.METHOD_NORET,
+    ObjectType.PROPERTY,
+    ObjectType.ACTION,
+    ObjectType.TRANSITION,
+)
+
+
+def _remove_named_child(parent_obj, name, allowed_types):
+    for obj in list(parent_obj.get_children()):
+        if obj.get_name() != name:
+            continue
+        if get_object_type(obj) not in allowed_types:
+            continue
+        safe_print(u"Removing " + name)
+        obj.remove()
+        return
+
+
+def remove_object_for_import_child(child, dir_path, dir_parent_obj):
+    """
+    Remove only the project object that corresponds to a single import file.
+
+    Used immediately before importing that file so unrelated objects (e.g. GVL,
+    PLC_PRG, Libs) are not deleted up front and lost when import aborts midway.
+    """
+    try:
+        if child.lower().endswith(u".xml.st"):
+            return
+    except Exception:
+        pass
+
+    full_path = os.path.join(dir_path, child)
+    filename, ext = os.path.splitext(child)
+
+    if os.path.isdir(full_path):
+        _remove_named_child(dir_parent_obj, child, (ObjectType.FOLDER,))
+        return
+
+    if filename.endswith(u".gvl"):
+        if ext != u".st":
+            return
+        name = filename.replace(u".gvl", u"")
+        _remove_named_child(
+            dir_parent_obj, name, (ObjectType.GVL, ObjectType.GVL_PERSISTENT)
+        )
+        return
+
+    if filename.endswith(u".vis"):
+        if ext != u".xml":
+            return
+        name = filename.replace(u".vis", u"")
+        _remove_named_child(dir_parent_obj, name, (ObjectType.VISUALISATION,))
+        return
+
+    if u"." in filename:
+        parent_name, member_name = filename.split(u".", 1)
+        parent_obj = first_of_type_or_none(
+            dir_parent_obj.find(parent_name), ObjectType.POU
+        )
+        if parent_obj is None:
+            return
+        for sub in list(parent_obj.get_children()):
+            if sub.get_name() != member_name:
+                continue
+            if get_object_type(sub) not in SUB_POU_MEMBER_TYPES:
+                continue
+            safe_print(u"Removing " + parent_name + u"." + member_name)
+            sub.remove()
+            return
+        return
+
+    if ext not in (u".xml", u".st"):
+        return
+
+    name = filename
+    for obj in list(dir_parent_obj.get_children()):
+        if obj.get_name() != name:
+            continue
+        obj_type = get_object_type(obj)
+        if obj_type in OBJECT_TYPE_TO_EXPORT_FUNCTION or obj_type == ObjectType.UNKNOWN:
+            safe_print(u"Removing " + name)
+            obj.remove()
+        return
+
+
+def remove_orphans_in_parent(parent_obj, dir_path):
+    """Remove application objects with no matching file on disk (after full import)."""
+    dir_path_bytes = ensure_unicode_path(dir_path)
+    if not os.path.isdir(dir_path_bytes):
+        return
+
+    expected = collect_application_import_object_names(dir_path)
+    for obj in list(parent_obj.get_children()):
+        name = obj.get_name()
+        obj_type = get_object_type(obj)
+
+        if name in expected:
+            if obj_type == ObjectType.FOLDER:
+                subdir = os.path.join(dir_path, name)
+                child_folder = first_of_type_or_none(
+                    parent_obj.find(name), ObjectType.FOLDER
+                )
+                if child_folder is not None:
+                    remove_orphans_in_parent(child_folder, subdir)
+            continue
+
+        if obj_type in OBJECT_TYPE_TO_EXPORT_FUNCTION or obj_type == ObjectType.UNKNOWN:
+            safe_print(u"Removing orphan " + name)
+            obj.remove()
+
 
 def collect_application_import_object_names(dir_path):
     """

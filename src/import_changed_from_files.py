@@ -6,18 +6,10 @@ import os
 from entrypoint import find_application, get_device_entrypoints, get_src_folder
 from git_import import import_git_base_ref, list_git_changed_under
 from import_export import *
+from import_export import SUB_POU_MEMBER_TYPES
 from import_from_files import first_word_of_line_iter, import_directory_child
 from object_type import ObjectType, get_object_type
 from util import *
-
-
-SUB_POU_MEMBER_TYPES = (
-    ObjectType.METHOD,
-    ObjectType.METHOD_NORET,
-    ObjectType.PROPERTY,
-    ObjectType.ACTION,
-    ObjectType.TRANSITION,
-)
 
 
 def _normalize_relpath(path):
@@ -215,13 +207,7 @@ def import_changed_from_files(project):
             for rel in deleted:
                 safe_print(u"  - " + rel)
 
-        expanded = _expand_changed_relpaths(application_folder, changed)
-
         for rel in deleted:
-            parsed = _parse_application_relpath(rel)
-            remove_object_for_relpath(application, parsed)
-
-        for rel in sorted(expanded):
             parsed = _parse_application_relpath(rel)
             remove_object_for_relpath(application, parsed)
 

@@ -7,6 +7,13 @@ import subprocess
 import sys
 import tempfile
 import time
+import warnings
+
+warnings.filterwarnings(
+    "ignore",
+    category=DeprecationWarning,
+    message="sys.exc_clear",
+)
 
 import scriptengine  # type: ignore
 

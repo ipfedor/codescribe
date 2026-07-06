@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
 import os
-import subprocess
 
-from util import ensure_unicode_path, safe_print
+from util import _cmdline_for_shell, ensure_unicode_path
 
 
 def import_git_base_ref():
@@ -23,22 +22,28 @@ def _decode_git_output(data):
 
 
 def _run_git(repo_root, args):
+    """
+    Run git without subprocess (avoids threading -> sys.exc_clear DeprecationWarning in CODESYS).
+    """
     repo_root = ensure_unicode_path(repo_root)
-    argv = ["git", "-C", repo_root] + list(args)
+    argv = ["git", "-C", repo_root] + [ensure_unicode_path(a) for a in args]
+    cmd = _cmdline_for_shell(argv) + " 2>&1"
     try:
-        proc = subprocess.Popen(
-            argv,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            shell=False,
-        )
+        pipe = os.popen(cmd)
     except OSError as e:
         raise ValueError(u"Cannot run git: " + unicode(e))
-    out, err = proc.communicate()
-    if proc.returncode != 0:
-        err_text = _decode_git_output(err).strip()
+    try:
+        raw = pipe.read()
+    finally:
+        status = pipe.close()
+    out = _decode_git_output(raw)
+    if status not in (None, 0):
+        err_text = out.strip()
         raise ValueError(u"git " + u" ".join(args[:3]) + u"... failed: " + err_text)
-    return _decode_git_output(out)
+    stripped = out.lstrip()
+    if stripped.startswith("fatal:") or stripped.startswith("error:"):
+        raise ValueError(u"git " + u" ".join(args[:3]) + u"... failed: " + stripped.strip())
+    return out
 
 
 def find_git_repo_root(start_path):
