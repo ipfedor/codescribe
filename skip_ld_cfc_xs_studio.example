@@ -1,0 +1,8 @@
+# Rename to `skip_ld_cfc_xs_studio` (no extension) in the codescribe repo root
+# to skip XML->ST conversion for LD/CFC diagrams when export runs inside XS Studio.
+#
+# Alternative: set user environment variable CODESCRIBE_SKIP_LD_CFC_XS_STUDIO=1
+#
+# To skip the external converter subprocess entirely on XS Studio (e.g. Kaspersky PDM):
+#   CODESCRIBE_SKIP_XML_CONVERTER_ON_XS_STUDIO=1
+#   or flag file `skip_xml_converter_xs_studio`

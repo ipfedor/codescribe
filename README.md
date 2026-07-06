@@ -74,6 +74,14 @@ Large exports no longer delete hundreds of files up front (`rmtree`); old folder
 
 If `System.OutOfMemoryException` persists: close other projects, restart CodeSYS, set user env `CODESCRIBE_SKIP_XML_CONVERTER=1` and run `codesys_export_to_st.py` manually in a shell after export. The export log prints each object name (`Device:`, `Exporting:`) so you can see where it stopped.
 
+### XS Studio / XML converter
+
+By default, export in XS Studio runs the external XML→ST converter for **all** diagrams including LD and CFC.
+
+To **skip LD/CFC** conversion only (opt-in): `CODESCRIBE_SKIP_LD_CFC_XS_STUDIO=1` or an empty flag file `skip_ld_cfc_xs_studio` in the codescribe repo root (see `skip_ld_cfc_xs_studio.example`).
+
+To **skip the entire subprocess** on XS Studio (e.g. Kaspersky PDM): `CODESCRIBE_SKIP_XML_CONVERTER_ON_XS_STUDIO=1` or flag file `skip_xml_converter_xs_studio`. A `RUN_XML_CONVERTER.cmd` is still written in the export folder for manual runs outside the IDE.
+
 ## Status
 
 CODESCRIBE has been tested only on CODESYS V3.5 SP11, using the project structure supplied by the IFM CR711s packages.

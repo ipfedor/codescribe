@@ -542,13 +542,40 @@ def _write_converter_input_path_file(folder_path):
     return path
 
 
-def _converter_command_candidates(script_path, input_path_file, launcher_cmd=None):
+def _env_truthy(name):
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+
+
+def _codescribe_flag_file(filename):
+    for root in _codescribe_repo_roots():
+        flag = os.path.join(root, filename)
+        try:
+            if os.path.isfile(flag):
+                return True, flag
+        except Exception:
+            pass
+    return False, None
+
+
+def _converter_extra_args():
+    extra = []
+    if _should_skip_ld_cfc_in_converter():
+        extra.append(u"--skip-ld-cfc")
+    return extra
+
+
+def _converter_command_candidates(script_path, input_path_file, launcher_cmd=None, extra_args=None):
+    if extra_args is None:
+        extra_args = []
     if script_path is None:
         if launcher_cmd is not None:
             yield [launcher_cmd, input_path_file], "cmd"
         return
 
-    tail = [script_path, "--input-path-file", input_path_file, "--inplace", "--dst-suffix", ".xml.st"]
+    tail = (
+        [script_path, "--input-path-file", input_path_file, "--inplace", "--dst-suffix", ".xml.st"]
+        + list(extra_args)
+    )
     prefixes = []
     for exe in _discover_python3_executables():
         exe_l = exe.lower()
@@ -599,23 +626,34 @@ def _is_xs_studio_host():
 
 
 def _should_skip_external_converter():
-    if os.environ.get("CODESCRIBE_SKIP_XML_CONVERTER", "").strip().lower() in ("1", "true", "yes"):
+    if _env_truthy("CODESCRIBE_SKIP_XML_CONVERTER"):
         return True, u"CODESCRIBE_SKIP_XML_CONVERTER is set"
-    if os.environ.get("CODESCRIBE_FORCE_XML_CONVERTER", "").strip().lower() in ("1", "true", "yes"):
+    if _env_truthy("CODESCRIBE_FORCE_XML_CONVERTER"):
         return False, u""
-    for root in _codescribe_repo_roots():
-        flag = os.path.join(root, u"skip_external_converter")
-        try:
-            if os.path.isfile(flag):
-                return True, u"skip_external_converter flag in " + root
-        except Exception:
-            pass
+    found, path = _codescribe_flag_file(u"skip_external_converter")
+    if found:
+        return True, u"skip_external_converter flag in " + path
     if _is_xs_studio_host():
-        return True, (
-            u"XS Studio host: external subprocess blocked by default "
-            u"(set CODESCRIBE_FORCE_XML_CONVERTER=1 to override)"
-        )
+        if _env_truthy("CODESCRIBE_SKIP_XML_CONVERTER_ON_XS_STUDIO"):
+            return True, u"CODESCRIBE_SKIP_XML_CONVERTER_ON_XS_STUDIO is set (full converter skip)"
+        found, path = _codescribe_flag_file(u"skip_xml_converter_xs_studio")
+        if found:
+            return True, u"skip_xml_converter_xs_studio flag in " + path
     return False, u""
+
+
+def _should_skip_ld_cfc_in_converter():
+    """
+    Opt-in: skip XML->ST only for LD/CFC diagrams when export runs inside XS Studio.
+    Disabled by default; enable with CODESCRIBE_SKIP_LD_CFC_XS_STUDIO=1 or
+    skip_ld_cfc_xs_studio flag file in the codescribe repo root.
+    """
+    if not _is_xs_studio_host():
+        return False
+    if _env_truthy("CODESCRIBE_SKIP_LD_CFC_XS_STUDIO"):
+        return True
+    found, _ = _codescribe_flag_file(u"skip_ld_cfc_xs_studio")
+    return found
 
 
 def _write_manual_converter_launcher(xml_root_folder, script_path):
@@ -715,11 +753,19 @@ def try_run_codesys_export_converter(xml_root_folder):
         _converter_diag_log(xml_root_folder, u"launcher cmd: " + launcher_cmd)
 
     input_path_file = None
+    converter_extra = _converter_extra_args()
+    if converter_extra:
+        _converter_diag_log(
+            xml_root_folder,
+            u"converter args: " + u" ".join(converter_extra),
+        )
     try:
         input_path_file = _write_converter_input_path_file(xml_root_folder)
         _converter_diag_log(xml_root_folder, u"input path file: " + ensure_unicode_path(input_path_file))
 
-        for cmd, launch_mode in _converter_command_candidates(script_path, input_path_file, launcher_cmd):
+        for cmd, launch_mode in _converter_command_candidates(
+            script_path, input_path_file, launcher_cmd, converter_extra
+        ):
             try:
                 cmd_line = u" ".join([unicode(c) for c in cmd])
                 safe_print(u"Running extra XML converter: " + cmd_line)
