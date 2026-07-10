@@ -1,4 +1,5 @@
 .vscode/
+.codescribe_tmp/
 
 # Local path to codesys-export-converter (copy from converter.path.example)
 converter.path

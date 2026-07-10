@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
+import errno
 import io
 import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 import warnings
 
@@ -512,41 +512,70 @@ def _discover_python3_executables():
     return found
 
 
-def _ascii_safe_dir_for_temp(path):
-    """
-    Каталог без не-ASCII символов для sidecar-файла, который уходит в subprocess.
-    TEMP (c:\\users\\программер\\...) ломает argv из IronPython.
-    """
-    path = _to_unicode_path(path)
-    probe = path
-    while probe and probe != os.path.dirname(probe):
-        try:
-            probe.encode("ascii")
-            if os.path.isdir(probe):
-                return probe
-        except UnicodeEncodeError:
-            pass
-        probe = os.path.dirname(probe)
-    windir = os.environ.get("WINDIR", r"C:\Windows")
+def _is_ascii_path(path):
     try:
-        windir.encode("ascii")
-        return windir
+        _to_unicode_path(path).encode("ascii")
+        return True
     except UnicodeEncodeError:
-        return tempfile.gettempdir()
+        return False
+
+
+def _ensure_dir(path):
+    path = _to_unicode_path(path)
+    if not os.path.isdir(path):
+        os.makedirs(path)
+    return path
+
+
+def _converter_sidecar_dir():
+    """
+    Writable ASCII-only directory for converter sidecar files.
+    Avoids tempfile.mkstemp on drive roots (e.g. D:\\) which fails in IronPython.
+    """
+    env = os.environ.get("CODESCRIBE_TEMP", "").strip()
+    if env and _is_ascii_path(env):
+        try:
+            return _ensure_dir(env)
+        except (OSError, IOError):
+            pass
+
+    for repo in _codescribe_repo_roots():
+        if _is_ascii_path(repo):
+            try:
+                return _ensure_dir(os.path.join(repo, ".codescribe_tmp"))
+            except (OSError, IOError):
+                pass
+
+    for env_name in ("TEMP", "TMP"):
+        base = os.environ.get(env_name, "")
+        if base and _is_ascii_path(base):
+            try:
+                return _ensure_dir(os.path.join(base, "codescribe"))
+            except (OSError, IOError):
+                pass
+
+    windir = os.environ.get("WINDIR", r"C:\Windows")
+    return _ensure_dir(os.path.join(windir, "Temp", "codescribe"))
 
 
 def _write_converter_input_path_file(folder_path):
     """
-    Записывает unicode-путь экспорта в UTF-8 sidecar-файл.
-    Сам файл кладём в ближайший ASCII-каталог (обычно D:\\projects\\...).
+    Записывает unicode-путь экспорта в UTF-8 sidecar-файл в ASCII-каталоге.
     """
     folder_path = ensure_unicode_path(folder_path)
-    anchor = _ascii_safe_dir_for_temp(folder_path)
-    fd, path = tempfile.mkstemp(suffix=".path", prefix="codescribe_xml_in_", dir=anchor)
-    os.close(fd)
-    with io.open(path, "w", encoding="utf-8") as f:
-        f.write(folder_path)
-    return path
+    sidecar_dir = _converter_sidecar_dir()
+    base = os.path.join(
+        sidecar_dir,
+        "codescribe_xml_in_%d_%d" % (os.getpid(), int(time.time() * 1000000)),
+    )
+    for i in range(100):
+        path = base + ("" if i == 0 else "_%d" % i) + ".path"
+        if os.path.exists(path):
+            continue
+        with io.open(path, "w", encoding="utf-8") as f:
+            f.write(folder_path)
+        return path
+    raise IOError(errno.EEXIST, "No usable temporary filename found")
 
 
 def _env_truthy(name):
@@ -767,7 +796,13 @@ def try_run_codesys_export_converter(xml_root_folder):
             u"converter args: " + u" ".join(converter_extra),
         )
     try:
-        input_path_file = _write_converter_input_path_file(xml_root_folder)
+        try:
+            input_path_file = _write_converter_input_path_file(xml_root_folder)
+        except (OSError, IOError) as e:
+            err = unicode(e)
+            safe_print(u"Warning: could not create converter input path file: " + err)
+            _converter_diag_log(xml_root_folder, u"ERROR: " + err)
+            return
         _converter_diag_log(xml_root_folder, u"input path file: " + ensure_unicode_path(input_path_file))
 
         for cmd, launch_mode in _converter_command_candidates(
