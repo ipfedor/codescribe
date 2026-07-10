@@ -101,6 +101,7 @@ def find_codesys_install_paths() -> list[Path]:
         Path("C:/Program Files"),
         Path("C:/Program Files (x86)"),
         Path("D:/Program Files"),
+        Path("D:/"),
     ]
     for base in search_bases:
         if not base.is_dir():
