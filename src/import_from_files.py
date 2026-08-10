@@ -16,6 +16,23 @@ def first_word_of_line_iter(f):
             yield words[0]
 
 
+def detect_st_object_kind(full_path):
+    """
+    Peek ST file keywords (TYPE vs PROGRAM/FUNCTION_BLOCK/FUNCTION).
+
+    Must close the file before import_pou_st/import_dut reopen it: on Windows
+    Python 2.7 a second open of the same path raises Errno 32 (sharing violation).
+    """
+    full_path_bytes = ensure_unicode_path(full_path)
+    with io.open(full_path_bytes, "r", encoding="utf-8") as f:
+        for word in first_word_of_line_iter(f):
+            if word == u"TYPE":
+                return u"dut"
+            if word in [u"PROGRAM", u"FUNCTION_BLOCK", u"FUNCTION"]:
+                return u"pou"
+    return None
+
+
 def import_directory(dir_path, dir_parent_obj):
     # dir_path может быть unicode, os.listdir вернёт unicode, если путь unicode
     children = os.listdir(dir_path)
@@ -64,16 +81,11 @@ def import_directory_child(child, dir_path, dir_parent_obj, import_dir_fn=None):
         if ext == ".xml":
             import_native(child, dir_path, dir_parent_obj, import_dir_fn)
         if ext == ".st":
-            # Have to check for keywords to determine if POU or DUT
-            # Используем io.open для корректного чтения UTF-8 файлов
-            with io.open(full_path, "r", encoding='utf-8') as f:
-                for word in first_word_of_line_iter(f):
-                    if word == u"TYPE":
-                        import_dut(child, dir_path, dir_parent_obj, import_dir_fn)
-                        break  # Нашли тип, дальше не ищем
-                    if word in [u"PROGRAM", u"FUNCTION_BLOCK", u"FUNCTION"]:
-                        import_pou_st(child, dir_path, dir_parent_obj, import_dir_fn)
-                        break
+            kind = detect_st_object_kind(full_path)
+            if kind == u"dut":
+                import_dut(child, dir_path, dir_parent_obj, import_dir_fn)
+            elif kind == u"pou":
+                import_pou_st(child, dir_path, dir_parent_obj, import_dir_fn)
 
 
 def import_from_files(project):
