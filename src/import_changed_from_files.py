@@ -37,12 +37,6 @@ def _parse_application_relpath(relpath):
         return {"scope": "skip"}
 
     if filename.endswith(u".vis"):
-        if ext == u".xml":
-            return {
-                "scope": "top",
-                "name": filename.replace(u".vis", u""),
-                "parent_path": dirname,
-            }
         return {"scope": "skip"}
 
     if u"." in filename:
@@ -208,6 +202,12 @@ def import_changed_from_files(project):
                 safe_print(u"  - " + rel)
 
         for rel in deleted:
+            rel_os = rel.replace("/", os.sep)
+            full_path = os.path.join(application_folder, rel_os)
+            child = os.path.basename(rel_os)
+            if should_skip_application_import_file(child, full_path):
+                safe_print(u"Skipping orphan removal (template object): " + rel)
+                continue
             parsed = _parse_application_relpath(rel)
             remove_object_for_relpath(application, parsed)
 

@@ -53,9 +53,13 @@ def import_directory_child(child, dir_path, dir_parent_obj, import_dir_fn=None):
     if import_dir_fn is None:
         import_dir_fn = import_directory
 
+    full_path = os.path.join(dir_path, child)
+    if should_skip_application_import_file(child, full_path):
+        safe_print(u"Skipping import (template object): " + child)
+        return
+
     remove_object_for_import_child(child, dir_path, dir_parent_obj)
 
-    full_path = os.path.join(dir_path, child)
     filename, ext = os.path.splitext(child)
 
     if os.path.isdir(full_path):

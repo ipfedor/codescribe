@@ -346,6 +346,64 @@ SUB_POU_MEMBER_TYPES = (
     ObjectType.TRANSITION,
 )
 
+# Native exports kept for reference / diff only — live in .project template, not round-trip import.
+IMPORT_SKIP_NATIVE_TYPE_GUIDS = frozenset([
+    u"ae1de277-a207-4a28-9efb-456c06bd52f3",  # Task configuration
+    u"f18bec89-9fef-401d-9953-2f11739a6808",  # Visualisation
+    u"4d3fdb8f-ab50-4c35-9d3a-d4bb9bb9a628",  # Visualization manager
+])
+
+_EXPORT_ROOT_TYPE_GUID_RE = re.compile(
+    ur'<Single Name="TypeGuid" Type="System\.Guid">([^<]+)</Single>',
+    re.IGNORECASE,
+)
+
+
+def _normalize_object_guid(guid):
+    if guid is None:
+        return None
+    if isinstance(guid, unicode):
+        g = guid
+    else:
+        g = unicode(guid)
+    return g.strip().strip(u"{}").lower()
+
+
+def _peek_export_root_type_guid(full_path):
+    path_bytes = ensure_unicode_path(full_path)
+    try:
+        with io.open(path_bytes, "r", encoding="utf-8") as f:
+            head = f.read(8192)
+    except (IOError, OSError):
+        return None
+    m = _EXPORT_ROOT_TYPE_GUID_RE.search(head)
+    if not m:
+        return None
+    return _normalize_object_guid(m.group(1))
+
+
+def should_skip_application_import_file(child, full_path):
+    """
+    Task config, visualisations and vis manager are exported for diff/reference but
+    must not be imported — GUIDs and device bindings are project-template specific.
+    """
+    filename, ext = os.path.splitext(child)
+    if filename.endswith(u".vis") and ext == u".xml":
+        return True
+    if ext != u".xml":
+        return False
+    if not os.path.isfile(ensure_unicode_path(full_path)):
+        return False
+    type_guid = _peek_export_root_type_guid(full_path)
+    return type_guid in IMPORT_SKIP_NATIVE_TYPE_GUIDS
+
+
+def is_template_managed_application_object(obj):
+    obj_type = get_object_type(obj)
+    if obj_type in (ObjectType.TASK_CONFIGURATION, ObjectType.VISUALISATION):
+        return True
+    return _normalize_object_guid(getattr(obj, "type", None)) in IMPORT_SKIP_NATIVE_TYPE_GUIDS
+
 
 def _remove_named_child(parent_obj, name, allowed_types):
     for obj in list(parent_obj.get_children()):
@@ -446,6 +504,9 @@ def remove_orphans_in_parent(parent_obj, dir_path):
                     remove_orphans_in_parent(child_folder, subdir)
             continue
 
+        if is_template_managed_application_object(obj):
+            continue
+
         if obj_type in OBJECT_TYPE_TO_EXPORT_FUNCTION or obj_type == ObjectType.UNKNOWN:
             safe_print(u"Removing orphan " + name)
             obj.remove()
@@ -469,6 +530,9 @@ def collect_application_import_object_names(dir_path):
 
         full_path = os.path.join(dir_path, child)
         filename, ext = os.path.splitext(child)
+
+        if should_skip_application_import_file(child, full_path):
+            continue
 
         if os.path.isdir(full_path):
             names.add(child)
