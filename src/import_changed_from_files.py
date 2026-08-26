@@ -124,38 +124,52 @@ def remove_object_for_relpath(root_obj, parsed):
     if parsed["scope"] == "top":
         parent = _resolve_parent_object(root_obj, parsed.get("parent_path", u""))
         name = parsed["name"]
+        target = None
         for child in list(parent.get_children()):
-            if child.get_name() != name:
-                continue
-            obj_type = get_object_type(child)
-            if obj_type in OBJECT_TYPE_TO_EXPORT_FUNCTION or obj_type == ObjectType.UNKNOWN:
-                safe_print(u"Removing " + name)
-                child.remove()
+            if child.get_name() == name:
+                target = child
+                break
+        if target is None:
+            target = _find_object_by_name_subtree(parent, name)
+        if target is None:
             return
+        obj_type = get_object_type(target)
+        if obj_type in OBJECT_TYPE_TO_EXPORT_FUNCTION or obj_type == ObjectType.UNKNOWN:
+            safe_print(u"Removing " + name)
+            target.remove()
+        return
 
 
-def import_directory_filtered(dir_path, dir_parent_obj, application_root, changed_relpaths):
-    changed_set = _expand_changed_relpaths(application_root, changed_relpaths)
+def import_directory_filtered(
+    dir_path, dir_parent_obj, application_folder, application_obj, changed_relpaths
+):
+    changed_set = _expand_changed_relpaths(application_folder, changed_relpaths)
 
-    def import_dir_fn(dp, dpo):
-        import_directory_filtered(dp, dpo, application_root, changed_relpaths)
+    def import_dir_fn(dp, dpo, app_obj=None):
+        import_directory_filtered(
+            dp, dpo, application_folder, app_obj or application_obj, changed_relpaths
+        )
 
     children = os.listdir(dir_path)
     for child in sorted(children, key=lambda x: x.count(".")):
         full_path = os.path.join(dir_path, child)
-        child_rel = _normalize_relpath(os.path.relpath(full_path, application_root))
+        child_rel = _normalize_relpath(os.path.relpath(full_path, application_folder))
 
         if os.path.isdir(full_path):
             if not _prefix_has_changes(child_rel, changed_set):
                 continue
             folder_obj = ensure_folder(dir_parent_obj, child)
-            import_directory_filtered(full_path, folder_obj, application_root, changed_relpaths)
+            import_directory_filtered(
+                full_path, folder_obj, application_folder, application_obj, changed_relpaths
+            )
             continue
 
         if child_rel not in changed_set:
             continue
 
-        import_directory_child(child, dir_path, dir_parent_obj, import_dir_fn)
+        import_directory_child(
+            child, dir_path, dir_parent_obj, import_dir_fn, application_obj
+        )
 
 
 def import_changed_from_files(project):
@@ -211,7 +225,9 @@ def import_changed_from_files(project):
             parsed = _parse_application_relpath(rel)
             remove_object_for_relpath(application, parsed)
 
-        import_directory_filtered(application_folder, application, application_folder, changed)
+        import_directory_filtered(
+            application_folder, application, application_folder, application, changed
+        )
 
     if not any_changes:
         safe_print(u"No changed application files to import.")

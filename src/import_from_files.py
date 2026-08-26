@@ -33,15 +33,32 @@ def detect_st_object_kind(full_path):
     return None
 
 
-def import_directory(dir_path, dir_parent_obj):
-    # dir_path может быть unicode, os.listdir вернёт unicode, если путь unicode
-    children = os.listdir(dir_path)
-    # this is a naughty way to ensure parent POU's are created before their children
-    for child in sorted(children, key=lambda x: x.count(".")):
-        import_directory_child(child, dir_path, dir_parent_obj)
+def import_directory(dir_path, dir_parent_obj, application_obj=None):
+    if application_obj is None:
+        application_obj = dir_parent_obj
+
+    def import_dir_fn(dp, dpo, app_obj=None):
+        import_directory(dp, dpo, app_obj or application_obj)
+
+    children = sorted(os.listdir(dir_path), key=lambda x: x.count("."))
+    deferred = []
+    for child in children:
+        full_path = os.path.join(dir_path, child)
+        if should_defer_native_import(child, full_path, application_obj):
+            deferred.append(child)
+            continue
+        import_directory_child(
+            child, dir_path, dir_parent_obj, import_dir_fn, application_obj
+        )
+    for child in deferred:
+        import_directory_child(
+            child, dir_path, dir_parent_obj, import_dir_fn, application_obj
+        )
 
 
-def import_directory_child(child, dir_path, dir_parent_obj, import_dir_fn=None):
+def import_directory_child(
+    child, dir_path, dir_parent_obj, import_dir_fn=None, application_obj=None
+):
     # Extra converter artifacts (sidecar ST for exported XML) must not be imported into CODESYS.
     # Example: `Something.xml.st`
     try:
@@ -53,17 +70,24 @@ def import_directory_child(child, dir_path, dir_parent_obj, import_dir_fn=None):
     if import_dir_fn is None:
         import_dir_fn = import_directory
 
+    if application_obj is None:
+        application_obj = dir_parent_obj
+
     full_path = os.path.join(dir_path, child)
     if should_skip_application_import_file(child, full_path):
         safe_print(u"Skipping import (template object): " + child)
         return
 
-    remove_object_for_import_child(child, dir_path, dir_parent_obj)
+    remove_object_for_import_child(
+        child, dir_path, dir_parent_obj, application_obj
+    )
 
     filename, ext = os.path.splitext(child)
 
     if os.path.isdir(full_path):
-        import_folder(child, dir_path, dir_parent_obj, import_dir_fn)
+        import_folder(
+            child, dir_path, dir_parent_obj, import_dir_fn, application_obj
+        )
 
     if filename.endswith(".gvl"):
         if ext == ".xml":
@@ -73,7 +97,9 @@ def import_directory_child(child, dir_path, dir_parent_obj, import_dir_fn=None):
             import_gvl(child, dir_path, dir_parent_obj, import_dir_fn)
     elif filename.endswith(".vis"):
         if ext == ".xml":
-            import_native(child, dir_path, dir_parent_obj, import_dir_fn)
+            import_native(
+                child, dir_path, dir_parent_obj, import_dir_fn, application_obj
+            )
     elif "." in filename:
         # . means some sort of sub POU
         if ext == ".xml":
@@ -83,7 +109,9 @@ def import_directory_child(child, dir_path, dir_parent_obj, import_dir_fn=None):
             import_method_st(child, dir_path, dir_parent_obj, import_dir_fn)
     else:
         if ext == ".xml":
-            import_native(child, dir_path, dir_parent_obj, import_dir_fn)
+            import_native(
+                child, dir_path, dir_parent_obj, import_dir_fn, application_obj
+            )
         if ext == ".st":
             kind = detect_st_object_kind(full_path)
             if kind == u"dut":
@@ -106,5 +134,5 @@ def import_from_files(project):
 
         application = find_application(device_obj)
         application_folder = os.path.join(device_folder, "application")
-        import_directory(application_folder, application)
+        import_directory(application_folder, application, application)
         remove_orphans_in_parent(application, application_folder)

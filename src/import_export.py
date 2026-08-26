@@ -137,14 +137,16 @@ def export_folder(child_obj, parent_obj, parent_folder_path, export_child_fn):
         export_child_fn(c, child_obj, child_obj_folder)
 
 
-def import_folder(child, dir_path, dir_parent_obj, import_dir_fn):
+def import_folder(child, dir_path, dir_parent_obj, import_dir_fn, application_obj=None):
     dir_parent_obj.create_folder(child)
     folder_obj = first_of_type_or_error(
         dir_parent_obj.find(child),
         ObjectType.FOLDER,
         u"Folder of name " + child + u" should have been created, but cannot be found",
     )
-    import_dir_fn(os.path.join(dir_path, child), folder_obj)
+    if application_obj is None:
+        application_obj = dir_parent_obj
+    import_dir_fn(os.path.join(dir_path, child), folder_obj, application_obj)
 
 
 def ensure_folder(dir_parent_obj, folder_name):
@@ -249,8 +251,19 @@ def export_native_recursive(child_obj, parent_obj, parent_folder_path, export_ch
     write_native(child_obj, os.path.join(parent_folder_path, child_obj.get_name() + u".xml"), recursive=True)
 
 
-def import_native(child, dir_path, dir_parent_obj, import_dir_fn):
-    read_native(os.path.join(dir_path, child), dir_parent_obj)
+def import_native(child, dir_path, dir_parent_obj, import_dir_fn, application_obj=None):
+    full_path = os.path.join(dir_path, child)
+    if application_obj is None:
+        application_obj = dir_parent_obj
+    parent_obj = resolve_native_import_parent(application_obj, dir_parent_obj, full_path)
+    if parent_obj is not dir_parent_obj:
+        try:
+            safe_print(
+                u"Importing " + child + u" under " + parent_obj.get_name()
+            )
+        except Exception:
+            pass
+    read_native(full_path, parent_obj)
 
 
 def export_dut(child_obj, parent_obj, parent_folder_path, export_child_fn):
@@ -353,9 +366,24 @@ IMPORT_SKIP_NATIVE_TYPE_GUIDS = frozenset([
     u"4d3fdb8f-ab50-4c35-9d3a-d4bb9bb9a628",  # Visualization manager
 ])
 
+RECIPE_MANAGER_TYPE_GUID = u"09ecc42e-586d-4a08-932f-5bdcac20bb55"
+PERSISTENT_VARIABLES_TYPE_GUID = u"6b3dfb6a-1865-4356-a39b-1fe0ef89651c"
+
 _EXPORT_ROOT_TYPE_GUID_RE = re.compile(
     ur'<Single Name="TypeGuid" Type="System\.Guid">([^<]+)</Single>',
     re.IGNORECASE,
+)
+_EXPORT_ROOT_GUID_RE = re.compile(
+    ur'<Single Name="Guid" Type="System\.Guid">([^<]+)</Single>',
+    re.IGNORECASE,
+)
+_EXPORT_ROOT_PARENT_GUID_RE = re.compile(
+    ur'<Single Name="ParentGuid" Type="System\.Guid">([^<]+)</Single>',
+    re.IGNORECASE,
+)
+_EXPORT_ROOT_OBJECT_NAME_RE = re.compile(
+    ur'<Single Name="MetaObject"[^>]*>.*?<Single Name="Name" Type="string">([^<]*)</Single>',
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -369,17 +397,134 @@ def _normalize_object_guid(guid):
     return g.strip().strip(u"{}").lower()
 
 
-def _peek_export_root_type_guid(full_path):
+def _read_export_head(full_path, size=8192):
     path_bytes = ensure_unicode_path(full_path)
     try:
         with io.open(path_bytes, "r", encoding="utf-8") as f:
-            head = f.read(8192)
+            return f.read(size)
     except (IOError, OSError):
+        return u""
+
+
+def _peek_export_root_meta(full_path):
+    head = _read_export_head(full_path)
+    if not head:
         return None
-    m = _EXPORT_ROOT_TYPE_GUID_RE.search(head)
-    if not m:
+    type_m = _EXPORT_ROOT_TYPE_GUID_RE.search(head)
+    guid_m = _EXPORT_ROOT_GUID_RE.search(head)
+    parent_m = _EXPORT_ROOT_PARENT_GUID_RE.search(head)
+    name_m = _EXPORT_ROOT_OBJECT_NAME_RE.search(head)
+    if not type_m and not guid_m and not parent_m and not name_m:
         return None
-    return _normalize_object_guid(m.group(1))
+    meta = {}
+    if type_m:
+        meta[u"type_guid"] = _normalize_object_guid(type_m.group(1))
+    if guid_m:
+        meta[u"guid"] = _normalize_object_guid(guid_m.group(1))
+    if parent_m:
+        meta[u"parent_guid"] = _normalize_object_guid(parent_m.group(1))
+    if name_m:
+        meta[u"name"] = name_m.group(1)
+    return meta
+
+
+def _peek_export_root_type_guid(full_path):
+    meta = _peek_export_root_meta(full_path)
+    if not meta:
+        return None
+    return meta.get(u"type_guid")
+
+
+def _object_guid(obj):
+    try:
+        return _normalize_object_guid(obj.guid)
+    except Exception:
+        return None
+
+
+def _find_object_by_guid_subtree(root_obj, guid):
+    target = _normalize_object_guid(guid)
+    if not target:
+        return None
+    queue = [root_obj]
+    while queue:
+        obj = queue.pop(0)
+        if _object_guid(obj) == target:
+            return obj
+        try:
+            queue.extend(obj.get_children())
+        except Exception:
+            pass
+    return None
+
+
+def _find_object_by_name_subtree(root_obj, name):
+    queue = [root_obj]
+    while queue:
+        obj = queue.pop(0)
+        if obj.get_name() == name:
+            return obj
+        try:
+            queue.extend(obj.get_children())
+        except Exception:
+            pass
+    return None
+
+
+def _find_recipe_manager(application_obj):
+    queue = list(application_obj.get_children())
+    while queue:
+        obj = queue.pop(0)
+        if _normalize_object_guid(getattr(obj, "type", None)) == RECIPE_MANAGER_TYPE_GUID:
+            return obj
+        if obj.get_name() in (u"RecipeManager", u"Recipe Manager", u"Rezeptmanager"):
+            return obj
+        try:
+            queue.extend(obj.get_children())
+        except Exception:
+            pass
+    return None
+
+
+def resolve_native_import_parent(application_obj, dir_parent_obj, full_path):
+    """
+    Native exports of RecipeManager children (e.g. PersistentVariables with recipe
+    data) are written flat into application/ but must be imported under their
+    real parent in the project tree.
+    """
+    meta = _peek_export_root_meta(full_path)
+    if meta is None:
+        return dir_parent_obj
+
+    parent_guid = meta.get(u"parent_guid")
+    if parent_guid:
+        found = _find_object_by_guid_subtree(application_obj, parent_guid)
+        if found is not None:
+            return found
+
+    if meta.get(u"type_guid") == PERSISTENT_VARIABLES_TYPE_GUID:
+        recipe_manager = _find_recipe_manager(application_obj)
+        if recipe_manager is not None:
+            return recipe_manager
+
+    if _object_guid(dir_parent_obj) == parent_guid:
+        return dir_parent_obj
+
+    return dir_parent_obj
+
+
+def should_defer_native_import(child, full_path, application_obj):
+    filename, ext = os.path.splitext(child)
+    if ext != u".xml" or u"." in filename:
+        return False
+    if should_skip_application_import_file(child, full_path):
+        return False
+    meta = _peek_export_root_meta(full_path)
+    if meta is None or not meta.get(u"parent_guid"):
+        return False
+    if _object_guid(application_obj) == meta.get(u"parent_guid"):
+        return False
+    return _find_object_by_guid_subtree(application_obj, meta[u"parent_guid"]) is None
 
 
 def should_skip_application_import_file(child, full_path):
@@ -416,7 +561,7 @@ def _remove_named_child(parent_obj, name, allowed_types):
         return
 
 
-def remove_object_for_import_child(child, dir_path, dir_parent_obj):
+def remove_object_for_import_child(child, dir_path, dir_parent_obj, application_obj=None):
     """
     Remove only the project object that corresponds to a single import file.
 
@@ -472,8 +617,18 @@ def remove_object_for_import_child(child, dir_path, dir_parent_obj):
     if ext not in (u".xml", u".st"):
         return
 
-    name = filename
-    for obj in list(dir_parent_obj.get_children()):
+    if application_obj is None:
+        application_obj = dir_parent_obj
+
+    meta = _peek_export_root_meta(full_path) if ext == u".xml" else None
+    name = meta.get(u"name") if meta and meta.get(u"name") else filename
+    parent_obj = (
+        resolve_native_import_parent(application_obj, dir_parent_obj, full_path)
+        if ext == u".xml"
+        else dir_parent_obj
+    )
+
+    for obj in list(parent_obj.get_children()):
         if obj.get_name() != name:
             continue
         obj_type = get_object_type(obj)
