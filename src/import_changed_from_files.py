@@ -150,8 +150,9 @@ def import_directory_filtered(
             dp, dpo, application_folder, app_obj or application_obj, changed_relpaths
         )
 
-    children = os.listdir(dir_path)
-    for child in sorted(children, key=lambda x: x.count(".")):
+    children = sorted(os.listdir(dir_path), key=lambda x: x.count("."))
+    to_import = []
+    for child in children:
         full_path = os.path.join(dir_path, child)
         child_rel = _normalize_relpath(os.path.relpath(full_path, application_folder))
 
@@ -166,7 +167,22 @@ def import_directory_filtered(
 
         if child_rel not in changed_set:
             continue
+        to_import.append(child)
 
+    pending_guids = collect_pending_native_import_guids(dir_path, to_import)
+    deferred = []
+    for child in to_import:
+        full_path = os.path.join(dir_path, child)
+        if should_defer_native_import(
+            child, full_path, application_obj, pending_guids
+        ):
+            deferred.append(child)
+            continue
+        import_directory_child(
+            child, dir_path, dir_parent_obj, import_dir_fn, application_obj
+        )
+    for child in deferred:
+        safe_print(u"Deferred import: " + child)
         import_directory_child(
             child, dir_path, dir_parent_obj, import_dir_fn, application_obj
         )

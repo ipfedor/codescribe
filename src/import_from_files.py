@@ -41,16 +41,20 @@ def import_directory(dir_path, dir_parent_obj, application_obj=None):
         import_directory(dp, dpo, app_obj or application_obj)
 
     children = sorted(os.listdir(dir_path), key=lambda x: x.count("."))
+    pending_guids = collect_pending_native_import_guids(dir_path, children)
     deferred = []
     for child in children:
         full_path = os.path.join(dir_path, child)
-        if should_defer_native_import(child, full_path, application_obj):
+        if should_defer_native_import(
+            child, full_path, application_obj, pending_guids
+        ):
             deferred.append(child)
             continue
         import_directory_child(
             child, dir_path, dir_parent_obj, import_dir_fn, application_obj
         )
     for child in deferred:
+        safe_print(u"Deferred import: " + child)
         import_directory_child(
             child, dir_path, dir_parent_obj, import_dir_fn, application_obj
         )

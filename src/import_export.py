@@ -263,7 +263,34 @@ def import_native(child, dir_path, dir_parent_obj, import_dir_fn, application_ob
             )
         except Exception:
             pass
-    read_native(full_path, parent_obj)
+
+    import_path = full_path
+    tmp_path = None
+    live_parent_guid = _object_guid(parent_obj)
+    meta = _peek_export_root_meta(full_path)
+    if (
+        live_parent_guid
+        and meta
+        and meta.get(u"parent_guid")
+        and meta[u"parent_guid"] != live_parent_guid
+    ):
+        tmp_path = full_path + u".codescribe_parent_guid.tmp"
+        if _rewrite_native_parent_guids(full_path, live_parent_guid, tmp_path):
+            safe_print(
+                u"Rewrote ParentGuid in " + child + u" -> " + live_parent_guid
+            )
+            import_path = tmp_path
+        else:
+            tmp_path = None
+
+    try:
+        read_native(import_path, parent_obj)
+    finally:
+        if tmp_path is not None:
+            try:
+                os.remove(ensure_unicode_path(tmp_path))
+            except (OSError, IOError):
+                pass
 
 
 def export_dut(child_obj, parent_obj, parent_folder_path, export_child_fn):
@@ -513,7 +540,42 @@ def resolve_native_import_parent(application_obj, dir_parent_obj, full_path):
     return dir_parent_obj
 
 
-def should_defer_native_import(child, full_path, application_obj):
+def collect_pending_native_import_guids(dir_path, child_names=None):
+    """
+    Object Guids of native XML files about to be (re)imported in this directory.
+
+    Used so children (e.g. PersistentVariables) are deferred until their parent
+    file (e.g. RecipeManager.xml) has been removed and re-imported — otherwise
+    alphabetically-earlier children are wiped when the parent is replaced.
+    """
+    guids = set()
+    try:
+        names = child_names if child_names is not None else os.listdir(dir_path)
+    except (OSError, IOError):
+        return guids
+    for child in names:
+        try:
+            if child.lower().endswith(u".xml.st"):
+                continue
+        except Exception:
+            pass
+        filename, ext = os.path.splitext(child)
+        if ext != u".xml" or u"." in filename:
+            continue
+        full_path = os.path.join(dir_path, child)
+        if should_skip_application_import_file(child, full_path):
+            continue
+        if not os.path.isfile(ensure_unicode_path(full_path)):
+            continue
+        meta = _peek_export_root_meta(full_path)
+        if meta and meta.get(u"guid"):
+            guids.add(meta[u"guid"])
+    return guids
+
+
+def should_defer_native_import(
+    child, full_path, application_obj, pending_import_guids=None
+):
     filename, ext = os.path.splitext(child)
     if ext != u".xml" or u"." in filename:
         return False
@@ -522,9 +584,48 @@ def should_defer_native_import(child, full_path, application_obj):
     meta = _peek_export_root_meta(full_path)
     if meta is None or not meta.get(u"parent_guid"):
         return False
-    if _object_guid(application_obj) == meta.get(u"parent_guid"):
+    parent_guid = meta[u"parent_guid"]
+    if _object_guid(application_obj) == parent_guid:
         return False
-    return _find_object_by_guid_subtree(application_obj, meta[u"parent_guid"]) is None
+    # Parent XML is in this import batch — wait until it is re-created.
+    if pending_import_guids and parent_guid in pending_import_guids:
+        return True
+    return _find_object_by_guid_subtree(application_obj, parent_guid) is None
+
+
+def _rewrite_native_parent_guids(src_path, live_parent_guid, dest_path):
+    """
+    Rewrite root ParentGuid / ParentSVNodeGuid to the live parent object Guid.
+
+    CODESYS import_native validates these against the project tree; a stale Guid
+    from another project/session makes recipe XML import silently fail.
+    """
+    src_bytes = ensure_unicode_path(src_path)
+    dest_bytes = ensure_unicode_path(dest_path)
+    live = _normalize_object_guid(live_parent_guid)
+    if not live:
+        return False
+    with io.open(src_bytes, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    def _sub_first(pattern, repl, s):
+        return re.sub(pattern, repl, s, count=1, flags=re.IGNORECASE)
+
+    new_text = _sub_first(
+        ur'(<Single Name="ParentGuid" Type="System\.Guid">)[^<]*(</Single>)',
+        ur"\g<1>" + live + ur"\g<2>",
+        text,
+    )
+    new_text = _sub_first(
+        ur'(<Single Name="ParentSVNodeGuid" Type="System\.Guid">)[^<]*(</Single>)',
+        ur"\g<1>" + live + ur"\g<2>",
+        new_text,
+    )
+    if new_text == text:
+        return False
+    with io.open(dest_bytes, "w", encoding="utf-8") as f:
+        f.write(new_text)
+    return True
 
 
 def should_skip_application_import_file(child, full_path):
