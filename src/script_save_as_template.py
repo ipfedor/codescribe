@@ -36,10 +36,7 @@ def delete_old_templates(template_paths):
             safe_print("    " + path)
         except UnicodeEncodeError:
             safe_print("    " + path.encode('utf-8'))
-        # Безопасное удаление файла
-        if isinstance(path, unicode):
-            path = path.encode('utf-8')
-        os.remove(path)
+        os.remove(ensure_unicode_path(path))
 
 
 try:
@@ -50,12 +47,9 @@ try:
     new_template_version = get_new_template_version(template_versions)
     new_template_path = generate_template_path(scriptengine.projects.primary, new_template_version)
 
-    # Безопасное копирование: преобразуем пути в байтовые строки, если это unicode
-    src_path = scriptengine.projects.primary.path
-    if isinstance(src_path, unicode):
-        src_path = src_path.encode('utf-8')
-    if isinstance(new_template_path, unicode):
-        new_template_path = new_template_path.encode('utf-8')
+    # Windows: keep unicode paths for copy/open (utf-8 bytes break Cyrillic)
+    src_path = ensure_unicode_path(scriptengine.projects.primary.path)
+    new_template_path = ensure_unicode_path(new_template_path)
     shutil.copyfile(src_path, new_template_path)
     scriptengine.projects.open(new_template_path, primary=False)
 

@@ -30,12 +30,11 @@ def assert_project_open():
 
 
 def assert_path_exists(path):
-    # В Python 2.7 os.path.exists корректно работает с unicode-строками,
-    # но для надёжности явно преобразуем в байтовую строку, если это unicode
-    if isinstance(path, unicode):
-        path = path.encode('utf-8')
+    # Windows Python 2.7: filesystem APIs need unicode (wide WinAPI) or mbcs.
+    # Encoding to UTF-8 bytes breaks Cyrillic paths (exists→False, mojibake in errors).
+    path = resolve_export_folder(_to_unicode_path(path))
     if not os.path.exists(path):
-        raise ValueError("Path " + path + " does not exist")
+        raise ValueError(u"Path " + path + u" does not exist")
 
 
 def first_or_none(lst):

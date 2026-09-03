@@ -56,7 +56,10 @@ To generate a project from a template file, you need two things: the `<project_n
 Two layouts are supported:
 
 1. **IFM-style `Communication` node** — top-level devices under `Communication` are exported to `Device/communication/<name>/` (children only, as before).
-2. **Device tree siblings of PLC Logic** — Ethernet, Modbus, and other fieldbus devices that sit next to `Plc Logic` / `Application` under the PLC device are exported to `Device/devices/<name>.xml` (native recursive export of the whole subtree).
+2. **Device tree siblings of PLC Logic** — Ethernet, Modbus, and other fieldbus devices that sit next to `Plc Logic` / `Application` under the PLC device:
+   - Parent **with nested children** (Modbus slaves, bus-expansion modules) → `Device/devices/<parent>/<child>.xml` (recursive native export **per child**, same idea as `communication/`). Parent-only `export_native(recursive=True)` often writes an empty EntryList stub on XS Studio.
+   - Leaf top-level device → `Device/devices/<name>.xml`.
+   - **Import** accepts both the nested-folder layout and legacy flat `devices/<name>.xml` files.
 
 The Application branch (POUs, GVLs, etc.) is still exported only from `Device/application/`.
 

@@ -43,12 +43,9 @@ try:
         project_path = scriptengine.projects.primary.path
 
         scriptengine.projects.primary.close()
-        # В Python 2.7 shutil.copyfile может работать с unicode путями,
-        # но для надёжности преобразуем в байтовую строку, если это unicode
-        if isinstance(newest_template_path, unicode):
-            newest_template_path = newest_template_path.encode('utf-8')
-        if isinstance(project_path, unicode):
-            project_path = project_path.encode('utf-8')
+        # Windows: keep unicode paths (utf-8 bytes break Cyrillic)
+        newest_template_path = ensure_unicode_path(newest_template_path)
+        project_path = ensure_unicode_path(project_path)
         shutil.copyfile(newest_template_path, project_path)
         scriptengine.projects.open(project_path)
 
