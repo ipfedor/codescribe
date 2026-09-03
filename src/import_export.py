@@ -125,7 +125,6 @@ _VARIABLE_MAP_RE = re.compile(
     ur'<Single Name="Variable" Type="string">([^<]*)</Single>',
     re.IGNORECASE,
 )
-_EMPTY_LIST2_RE = re.compile(ur"^([ \t]*)<List2 Name=\"Mappings\"\s*/>", re.MULTILINE)
 _DEFAULT_VAR_RE = re.compile(
     ur'<Single Name="Default" Type="string">((?:i_|o_)[^<]+)</Single>'
 )
@@ -231,34 +230,6 @@ def fill_empty_bit_io_mappings(xml_text):
 
     new_text = _EMPTY_BIT_MAP_RE.sub(_repl, xml_text)
     return new_text, filled[0]
-
-
-def fill_empty_io_mappings_from_visible_names(xml_text):
-    """
-    Fill empty IoMapping List2 only for null-duplicate bit nodes — from nearest
-    VisibleName Default (i_*/o_*). Word/dword aggregate sites stay empty.
-    """
-    if not xml_text:
-        return xml_text, 0
-
-    out = []
-    last = 0
-    filled = 0
-
-    for m in _EMPTY_LIST2_RE.finditer(xml_text):
-        var = _nearest_default_io_var(xml_text, m.start())
-        if not var:
-            continue
-        indent = m.group(1)
-        out.append(xml_text[last : m.start()])
-        out.append(_mapping_list2_block(indent, var))
-        last = m.end()
-        filled += 1
-
-    if filled == 0:
-        return xml_text, 0
-    out.append(xml_text[last:])
-    return u"".join(out), filled
 
 
 def prepare_device_io_mapping_xml(xml_text):
