@@ -129,16 +129,6 @@ _EMPTY_LIST2_RE = re.compile(ur"^([ \t]*)<List2 Name=\"Mappings\"\s*/>", re.MULT
 _DEFAULT_VAR_RE = re.compile(
     ur'<Single Name="Default" Type="string">((?:i_|o_)[^<]+)</Single>'
 )
-# Bit channel address: %IX0.0 / %QX1.3 — has a bit suffix after the dot.
-_BIT_ADDR_VAR_RE = re.compile(
-    ur'<Single Name="ActualAddr" Type="string">(%[IQ]X\d+\.\d+)</Single>'
-    ur".*?"
-    ur'<Single Name="Variable" Type="string">((?:i_|o_)[^<]+)</Single>',
-    re.IGNORECASE | re.DOTALL,
-)
-_WORD_ADDR_RE = re.compile(
-    ur'<Single Name="ActualAddr" Type="string">(%[IQ][WD]\d+)</Single>'
-)
 
 
 def count_io_variable_mappings(xml_text):
@@ -185,49 +175,81 @@ def _mapping_list2_block(indent, var):
     )
 
 
-def _ordered_bit_vars(xml_text):
-    """Unique i_*/o_* vars from filled %IX/%QX bit mappings, document order."""
-    seen = set()
-    ordered = []
-    for m in _BIT_ADDR_VAR_RE.finditer(xml_text or u""):
-        var = m.group(2).strip()
-        if not var or var in seen:
-            continue
-        seen.add(var)
-        ordered.append(var)
-    return ordered
+# Word/dword IoMapping sites with i_/o_* vars are aggregate/errcode copies — not real I/O.
+# Stay inside one IoMapping: ActualAddr %[IQ][WD] is a sibling of List2. Do not use
+# DOTALL .*? — on XF-E16Y ErrCode %IW/%ID sit *before* bits and would eat %QX0.0.
+_FILLED_WORD_DWORD_MAP_RE = re.compile(
+    ur'(<Single Name="ActualAddr" Type="string">%[IQ][WD]\d+</Single>\s*'
+    ur'<Single Name="AutomaticAddress"[^>]*>[^<]*</Single>\s*'
+    ur'<Single Name="IecAddress"[^>]*>[^<]*</Single>\s*'
+    ur'<Single Name="Mappings"[^>]*>\s*)'
+    ur'<List2 Name="Mappings">\s*'
+    ur'<Single Type="\{47edf8ea-3f84-452c-b998-e18f878578d3\}" Method="IArchivable">\s*'
+    ur'<Single Name="Variable" Type="string">(?:i_|o_)[^<]+</Single>[\s\S]*?'
+    ur'</List2>',
+    re.IGNORECASE,
+)
+
+
+def strip_unnecessary_word_dword_mappings(xml_text):
+    """Clear i_/o_* Variable rows on %IW/%ID/%QW/%QD IoMapping sites."""
+    if not xml_text:
+        return xml_text, 0
+
+    def _repl(m):
+        return m.group(1) + u'<List2 Name="Mappings" />'
+
+    new_text, n = _FILLED_WORD_DWORD_MAP_RE.subn(_repl, xml_text)
+    return new_text, n
+
+
+_EMPTY_BIT_MAP_RE = re.compile(
+    ur'(<Single Name="ActualAddr" Type="string">%[IQ]X\d+\.\d+</Single>\s*'
+    ur'<Single Name="AutomaticAddress"[^>]*>[^<]*</Single>\s*'
+    ur'<Single Name="IecAddress"[^>]*>[^<]*</Single>\s*'
+    ur'<Single Name="Mappings"[^>]*>)(\s*)'
+    ur'<List2 Name="Mappings"\s*/>',
+    re.IGNORECASE,
+)
+
+
+def fill_empty_bit_io_mappings(xml_text):
+    """Restore empty %[IQ]X List2 from nearest VisibleName Default (i_*/o_*)."""
+    if not xml_text:
+        return xml_text, 0
+
+    filled = [0]
+
+    def _repl(m):
+        var = _nearest_default_io_var(xml_text, m.start())
+        if not var:
+            return m.group(0)
+        ws = m.group(2)
+        indent = ws.rsplit(u"\n", 1)[-1] if u"\n" in ws else ws
+        filled[0] += 1
+        return m.group(1) + u"\n" + _mapping_list2_block(indent, var)
+
+    new_text = _EMPTY_BIT_MAP_RE.sub(_repl, xml_text)
+    return new_text, filled[0]
 
 
 def fill_empty_io_mappings_from_visible_names(xml_text):
     """
-    Fill empty IoMapping lists so import matches a complete A1-style module XML:
-
-    1) Null-ActualAddr duplicate bit nodes — from nearest VisibleName Default (i_*/o_*).
-    2) Word/dword aggregates (%IW/%ID/%QW/%QD) — from ordered bit vars of this module
-       (A1 maps %IW0/%IW1/%ID1 → first bit CreateVariable names in order).
+    Fill empty IoMapping List2 only for null-duplicate bit nodes — from nearest
+    VisibleName Default (i_*/o_*). Word/dword aggregate sites stay empty.
     """
     if not xml_text:
         return xml_text, 0
 
-    bit_vars = _ordered_bit_vars(xml_text)
     out = []
     last = 0
     filled = 0
-    word_idx = 0
 
     for m in _EMPTY_LIST2_RE.finditer(xml_text):
-        indent = m.group(1)
         var = _nearest_default_io_var(xml_text, m.start())
         if not var:
-            # Word/dword aggregate (3rd mapping site): no VisibleName Default nearby.
-            look = xml_text[max(0, m.start() - 900) : m.start()]
-            am = None
-            for cand in _WORD_ADDR_RE.finditer(look):
-                am = cand
-            if am is None or word_idx >= len(bit_vars):
-                continue
-            var = bit_vars[word_idx]
-            word_idx += 1
+            continue
+        indent = m.group(1)
         out.append(xml_text[last : m.start()])
         out.append(_mapping_list2_block(indent, var))
         last = m.end()
@@ -239,8 +261,15 @@ def fill_empty_io_mappings_from_visible_names(xml_text):
     return u"".join(out), filled
 
 
+def prepare_device_io_mapping_xml(xml_text):
+    """Strip word/dword copies; refill empty bit %[IQ]X maps from VisibleName."""
+    text, stripped = strip_unnecessary_word_dword_mappings(xml_text)
+    text, filled = fill_empty_bit_io_mappings(text)
+    return text, stripped, filled
+
+
 def write_native_preserving_io_maps(obj, path, recursive=False):
-    """export_native then restore/fill I/O Variable mappings when export strips them."""
+    """export_native; keep previous bit maps only when new export strips them."""
     path_bytes = ensure_unicode_path(path)
     previous = u""
     if os.path.isfile(path_bytes):
@@ -267,15 +296,21 @@ def write_native_preserving_io_maps(obj, path, recursive=False):
             + unicode(prev_count)
             + u")"
         )
-    text2, filled = fill_empty_io_mappings_from_visible_names(text)
+    text, stripped, filled = prepare_device_io_mapping_xml(text)
+    if stripped:
+        safe_print(
+            u"  Cleared "
+            + unicode(stripped)
+            + u" word/dword IoMapping copies in "
+            + os.path.basename(path_bytes)
+        )
     if filled:
         safe_print(
             u"  Filled "
             + unicode(filled)
-            + u" empty IoMapping Mappings in "
+            + u" empty bit IoMappings in "
             + os.path.basename(path_bytes)
         )
-        text = text2
     if text != new_text:
         with io.open(path_bytes, u"w", encoding=u"utf-8") as f:
             f.write(text)
@@ -294,9 +329,8 @@ def read_native_under_parent(path, parent_obj, host_obj=None):
     """
     import_native under parent_obj, rewriting stale Guids from another session.
 
-    Also fills empty <List2 Name=\"Mappings\" />:
-    - Null-ActualAddr duplicates from VisibleName Default (i_*/o_*)
-    - word/dword aggregates (%IW/%ID/%QW/%QD) from ordered bit vars
+    Strips word/dword IoMapping copies before import.
+    Always inserts a new child — never an in-place update.
     """
     original_path = ensure_unicode_path(path)
     live_parent = _object_guid(parent_obj)
@@ -320,19 +354,27 @@ def read_native_under_parent(path, parent_obj, host_obj=None):
         try:
             with io.open(original_path, u"r", encoding=u"utf-8") as f:
                 src_text = f.read()
-            filled_text, n_filled = fill_empty_io_mappings_from_visible_names(src_text)
-            if n_filled:
+            prepared, n_stripped, n_filled = prepare_device_io_mapping_xml(src_text)
+            if n_stripped or n_filled:
                 fill_tmp = original_path + u".codescribe_iomap_fill.tmp"
                 with io.open(fill_tmp, u"w", encoding=u"utf-8") as f:
-                    f.write(filled_text)
+                    f.write(prepared)
                 temps.append(fill_tmp)
                 work_path = fill_tmp
-                safe_print(
-                    u"Filled "
-                    + unicode(n_filled)
-                    + u" empty Mappings before import: "
-                    + os.path.basename(original_path)
-                )
+                if n_stripped:
+                    safe_print(
+                        u"Cleared "
+                        + unicode(n_stripped)
+                        + u" word/dword IoMapping copies before import: "
+                        + os.path.basename(original_path)
+                    )
+                if n_filled:
+                    safe_print(
+                        u"Filled "
+                        + unicode(n_filled)
+                        + u" empty bit IoMappings before import: "
+                        + os.path.basename(original_path)
+                    )
         except (IOError, OSError):
             pass
 
