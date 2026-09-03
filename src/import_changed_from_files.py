@@ -143,6 +143,8 @@ def remove_object_for_relpath(root_obj, parsed):
 def import_directory_filtered(
     dir_path, dir_parent_obj, application_folder, application_obj, changed_relpaths
 ):
+    dir_path = ensure_unicode_path(dir_path)
+    application_folder = ensure_unicode_path(application_folder)
     changed_set = _expand_changed_relpaths(application_folder, changed_relpaths)
 
     def import_dir_fn(dp, dpo, app_obj=None):
@@ -153,7 +155,7 @@ def import_directory_filtered(
     children = sorted(os.listdir(dir_path), key=lambda x: x.count("."))
     to_import = []
     for child in children:
-        full_path = os.path.join(dir_path, child)
+        full_path = ensure_unicode_path(os.path.join(dir_path, child))
         child_rel = _normalize_relpath(os.path.relpath(full_path, application_folder))
 
         if os.path.isdir(full_path):
@@ -172,7 +174,7 @@ def import_directory_filtered(
     pending_guids = collect_pending_native_import_guids(dir_path, to_import)
     deferred = []
     for child in to_import:
-        full_path = os.path.join(dir_path, child)
+        full_path = ensure_unicode_path(os.path.join(dir_path, child))
         if should_defer_native_import(
             child, full_path, application_obj, pending_guids
         ):
@@ -189,24 +191,27 @@ def import_directory_filtered(
 
 
 def import_changed_from_files(project):
-    src_folder = get_src_folder(project)
+    # Keep unicode paths end-to-end (Windows Python 2.7; never utf-8 bytes).
+    src_folder = ensure_unicode_path(get_src_folder(project))
     base_ref = import_git_base_ref()
     safe_print(u"Reading git changes from: " + src_folder)
     safe_print(u"Git base ref: " + base_ref)
-    assert_path_exists(ensure_unicode_path(src_folder))
+    safe_print(
+        u"Note: Import Changed covers Device/application/ only "
+        u"(not devices/ or communication/). Use Import From Files for modules."
+    )
+    assert_path_exists(src_folder)
 
     any_changes = False
 
     for device_obj in get_device_entrypoints(project):
-        device_folder = os.path.join(src_folder, device_obj.get_name())
-        device_folder_bytes = ensure_unicode_path(device_folder)
-        if not os.path.isdir(device_folder_bytes):
+        device_folder = ensure_unicode_path(os.path.join(src_folder, device_obj.get_name()))
+        if not os.path.isdir(device_folder):
             continue
 
         application = find_application(device_obj)
-        application_folder = os.path.join(device_folder, "application")
-        application_folder_bytes = ensure_unicode_path(application_folder)
-        if not os.path.isdir(application_folder_bytes):
+        application_folder = ensure_unicode_path(os.path.join(device_folder, "application"))
+        if not os.path.isdir(application_folder):
             continue
 
         try:
@@ -233,7 +238,7 @@ def import_changed_from_files(project):
 
         for rel in deleted:
             rel_os = rel.replace("/", os.sep)
-            full_path = os.path.join(application_folder, rel_os)
+            full_path = ensure_unicode_path(os.path.join(application_folder, rel_os))
             child = os.path.basename(rel_os)
             if should_skip_application_import_file(child, full_path):
                 safe_print(u"Skipping orphan removal (template object): " + rel)

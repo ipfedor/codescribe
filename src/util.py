@@ -62,13 +62,43 @@ def first_or_error(lst, err):
         raise ValueError(err)
 
 def safe_print(msg):
-    """Безопасная печать строки с поддержкой UTF-8 в Python 2.7"""
+    """
+    Print to XS Studio / CODESYS Messages.
+
+    Do NOT encode unicode paths as UTF-8 bytes — the host treats stdout as
+    ANSI/mbcs, so UTF-8 becomes mojibake (ÐœÐ¸Ñ€Ð°Ñ‚Ð¾Ñ€Ð³...). Prefer unicode
+    print; fall back to mbcs.
+    """
+    if msg is None:
+        return
+    if not isinstance(msg, (unicode, str)):
+        try:
+            msg = unicode(msg)
+        except Exception:
+            msg = str(msg)
     if isinstance(msg, unicode):
-        msg = msg.encode('utf-8')
+        try:
+            print(msg)
+            return
+        except Exception:
+            pass
+        try:
+            print(msg.encode("mbcs", "replace"))
+            return
+        except Exception:
+            pass
+        try:
+            print(msg.encode("utf-8", "replace"))
+            return
+        except Exception:
+            return
     try:
         print(msg)
-    except UnicodeEncodeError:
-        print(msg.decode('utf-8').encode('utf-8'))
+    except Exception:
+        try:
+            print(repr(msg))
+        except Exception:
+            pass
 
 def fix_encoding(name):
     """
@@ -107,45 +137,85 @@ def _to_unicode_path(path):
     return path
 
 
-def resolve_export_folder(path):
+def _match_path_entry(parent, name, want_dir=None):
     """
-    Возвращает путь к папке экспорта так, как она реально существует на диске.
-    Исправляет mojibake и расхождение unicode/str из project.path.
+    Return existing unicode entry under parent matching name (exact or mojibake).
+    want_dir: True=dirs only, False=files only, None=either.
     """
-    path = _to_unicode_path(path)
-    if os.path.isdir(path):
-        return path
+    if not name:
+        return None
 
-    fixed = _try_utf8_mojibake_unicode(path)
-    if fixed != path and os.path.isdir(fixed):
-        return fixed
+    def _ok(full):
+        if want_dir is True:
+            return os.path.isdir(full)
+        if want_dir is False:
+            return os.path.isfile(full)
+        return os.path.exists(full)
 
-    parent = os.path.dirname(path)
-    base = os.path.basename(path)
-    if not os.path.isdir(parent):
-        return path
-
+    candidate = os.path.join(parent, name)
+    if _ok(candidate):
+        return candidate
+    fixed = _try_utf8_mojibake_unicode(name)
+    candidate = os.path.join(parent, fixed)
+    if fixed != name and _ok(candidate):
+        return candidate
     try:
         entries = os.listdir(parent)
     except Exception:
+        return None
+    for entry in entries:
+        full = os.path.join(parent, entry)
+        if not _ok(full):
+            continue
+        if entry == name or entry == fixed:
+            return full
+        if _try_utf8_mojibake_unicode(entry) in (name, fixed):
+            return full
+    return None
+
+
+def resolve_export_folder(path):
+    """
+    Возвращает путь так, как он реально существует на диске.
+    Исправляет mojibake и расхождение unicode/str из project.path.
+    Walks segments so nested Cyrillic folders resolve even if only some names are wrong.
+    """
+    path = _to_unicode_path(path)
+    if os.path.exists(path):
         return path
 
-    if base in entries and os.path.isdir(os.path.join(parent, base)):
-        return os.path.join(parent, base)
+    fixed = _try_utf8_mojibake_unicode(path)
+    if fixed != path and os.path.exists(fixed):
+        return fixed
 
-    fixed_base = _try_utf8_mojibake_unicode(base)
-    candidate = os.path.join(parent, fixed_base)
-    if os.path.isdir(candidate):
-        return candidate
+    drive, tail = os.path.splitdrive(path)
+    if drive:
+        cur = drive + u"\\"
+        rest = tail.lstrip(u"\\/")
+    elif path.startswith(u"\\\\"):
+        # UNC: keep as-is if we cannot safely rewrite
+        return path
+    else:
+        if hasattr(os, "getcwdu"):
+            cur = os.getcwdu()
+        else:
+            cur = _to_unicode_path(os.getcwd())
+        rest = path
 
-    for name in entries:
-        full = os.path.join(parent, name)
-        if not os.path.isdir(full):
-            continue
-        if _try_utf8_mojibake_unicode(name) == fixed_base or name == fixed_base:
-            return full
+    if not rest:
+        return path
 
-    return path
+    segments = [s for s in rest.replace(u"/", u"\\").split(u"\\") if s]
+    if not segments:
+        return path
+
+    for i, seg in enumerate(segments):
+        is_last = i == len(segments) - 1
+        matched = _match_path_entry(cur, seg, want_dir=None if is_last else True)
+        if matched is None:
+            return os.path.join(cur, *segments[i:])
+        cur = matched
+    return cur
 
 
 def ensure_unicode_path(path):
@@ -412,10 +482,11 @@ def _argv_for_subprocess(argv):
     out = []
     for arg in argv:
         if isinstance(arg, unicode):
+            # Windows CreateProcess/shell need mbcs (ANSI), never utf-8 path bytes.
             try:
                 arg = arg.encode("mbcs")
             except UnicodeEncodeError:
-                arg = arg.encode("utf-8")
+                arg = arg.encode("mbcs", "replace")
         elif not isinstance(arg, str):
             arg = str(arg)
         out.append(arg)

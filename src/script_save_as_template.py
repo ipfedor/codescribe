@@ -61,7 +61,9 @@ try:
         communication = find_communication(device_obj)
         if communication is not None:
             remove_tracked_communication_devices(communication)
-        device_folder = os.path.join(get_src_folder(template_project), device_obj.get_name())
+        device_folder = ensure_unicode_path(
+            os.path.join(get_src_folder(template_project), device_obj.get_name())
+        )
         remove_tracked_device_tree_devices(device_obj, device_folder)
 
     template_project.save()

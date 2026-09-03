@@ -89,9 +89,11 @@ To **skip the entire subprocess** on XS Studio (e.g. Kaspersky PDM): `CODESCRIBE
 
 **Import Changed From Files** imports only files under `Device/application/` that differ from git `HEAD` (uncommitted + staged changes, new untracked files). Deleted files are removed from the project.
 
+It does **not** import `Device/devices/` (Modbus / expansion modules) or `Device/communication/`. For those, use **Import From Files**.
+
 Compare against another ref (e.g. remote main): set `CODESCRIBE_IMPORT_GIT_BASE=origin/main`.
 
-Requires a git repository containing the export folder. Use **Import From Files** for a full sync.
+Requires a git repository containing the export folder. Use **Import From Files** for a full sync (application + devices + communication).
 
 ## Status
 

@@ -41,6 +41,7 @@ def detect_st_object_kind(full_path):
 
 
 def import_directory(dir_path, dir_parent_obj, application_obj=None):
+    dir_path = ensure_unicode_path(dir_path)
     if application_obj is None:
         application_obj = dir_parent_obj
 
@@ -51,7 +52,7 @@ def import_directory(dir_path, dir_parent_obj, application_obj=None):
     pending_guids = collect_pending_native_import_guids(dir_path, children)
     deferred = []
     for child in children:
-        full_path = os.path.join(dir_path, child)
+        full_path = ensure_unicode_path(os.path.join(dir_path, child))
         if should_defer_native_import(
             child, full_path, application_obj, pending_guids
         ):
@@ -84,7 +85,8 @@ def import_directory_child(
     if application_obj is None:
         application_obj = dir_parent_obj
 
-    full_path = os.path.join(dir_path, child)
+    dir_path = ensure_unicode_path(dir_path)
+    full_path = ensure_unicode_path(os.path.join(dir_path, child))
     if should_skip_application_import_file(child, full_path):
         safe_print(u"Skipping import (template object): " + child)
         return
@@ -132,24 +134,22 @@ def import_directory_child(
 
 
 def import_from_files(project):
-    src_folder = get_src_folder(project)
-    safe_print("Reading from: " + src_folder)
-    # Преобразуем путь в байтовую строку для проверки существования
-    src_folder_bytes = ensure_unicode_path(src_folder)
-    assert_path_exists(src_folder_bytes)
+    # Keep unicode paths end-to-end (Windows Python 2.7; never utf-8 bytes).
+    src_folder = ensure_unicode_path(get_src_folder(project))
+    safe_print(u"Reading from: " + src_folder)
+    assert_path_exists(src_folder)
 
     for device_obj in get_device_entrypoints(project):
-        device_folder = os.path.join(src_folder, device_obj.get_name())
-        device_folder_bytes = ensure_unicode_path(device_folder)
-        assert_path_exists(device_folder_bytes)
+        device_folder = ensure_unicode_path(os.path.join(src_folder, device_obj.get_name()))
+        assert_path_exists(device_folder)
 
         application = find_application(device_obj)
-        application_folder = os.path.join(device_folder, "application")
+        application_folder = ensure_unicode_path(os.path.join(device_folder, "application"))
         import_directory(application_folder, application, application)
         remove_orphans_in_parent(application, application_folder)
 
         communication = find_communication(device_obj)
         if communication is not None:
-            import_communication(communication, device_folder)
+            import_communication(communication, device_folder, device_obj)
 
-        import_device_tree_siblings(device_obj, device_folder)
+        import_device_tree_siblings(device_obj, device_folder, application)

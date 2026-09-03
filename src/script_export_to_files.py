@@ -48,14 +48,12 @@ try:
         device_name = device_obj.get_name()
         safe_print(u"Device: " + device_name)
         # device_name может быть unicode
-        device_folder = os.path.join(staging_folder, device_name)
-        device_folder_bytes = ensure_unicode_path(device_folder)
-        os.mkdir(device_folder_bytes)
+        device_folder = ensure_unicode_path(os.path.join(staging_folder, device_name))
+        os.mkdir(device_folder)
 
         application = find_application(device_obj)
-        application_folder = os.path.join(device_folder, "application")
-        application_folder_bytes = ensure_unicode_path(application_folder)
-        os.mkdir(application_folder_bytes)
+        application_folder = ensure_unicode_path(os.path.join(device_folder, "application"))
+        os.mkdir(application_folder)
 
         for child_obj in application.get_children():
             safe_print(u"  Exporting: " + child_obj.get_name())

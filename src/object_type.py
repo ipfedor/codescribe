@@ -79,12 +79,19 @@ GUID_TYPE_MAPPING = {
 
 
 def get_object_type(obj):
-    # Безопасное преобразование GUID в байтовую строку (str в Python 2)
+    # Safe Guid → type map lookup (Python 2.7).
+    # CODESYS/XS Studio often stringify Guids as "{uuid}" or mixed case;
+    # mapping keys are lowercase uuid without braces.
     guid = obj.type
     if guid is None:
         return ObjectType.UNKNOWN
     if isinstance(guid, unicode):
-        guid = guid.encode('utf-8')
+        g = guid
     else:
-        guid = str(guid)
-    return GUID_TYPE_MAPPING.get(guid, ObjectType.UNKNOWN)
+        try:
+            g = unicode(guid)
+        except Exception:
+            g = unicode(str(guid))
+    g = g.strip().strip(u"{}").lower()
+    key = g.encode("ascii", "replace")
+    return GUID_TYPE_MAPPING.get(key, ObjectType.UNKNOWN)
