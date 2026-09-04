@@ -57,8 +57,8 @@ try:
 
         for child_obj in application.get_children():
             safe_print(u"  Exporting: " + child_obj.get_name())
+            # No per-child gc.collect(): was slowing export; one collect at end is enough.
             export_child(child_obj, application, application_folder)
-            gc.collect()
 
         communication = find_communication(device_obj)
         if communication is not None:
@@ -77,6 +77,7 @@ try:
     # Дополнительная обработка XML (если подключён внешний конвертер).
     # Важно: запускать после того, как все XML уже записаны на диск.
     finalize_export_folder(src_folder, staging_folder)
+    # Single GC after all native exports (not after every object).
     gc.collect()
     try_run_codesys_export_converter(src_folder)
     safe_print("Export folder: " + src_folder)

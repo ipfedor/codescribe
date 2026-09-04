@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
-import gc
 import os
 import re
 
@@ -55,7 +54,7 @@ def export_communication(communication_obj, device_folder):
             write_native_preserving_io_maps(
                 child_device, export_path_bytes, recursive=True
             )
-            gc.collect()
+            # No per-device gc.collect() — see write_native success-path note.
 
 
 def import_communication(communication_obj, device_folder, host_device_obj=None):

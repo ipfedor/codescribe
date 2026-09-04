@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 # REMEMBER: this is python 2.7
-import gc
 import io
 import os
 import re
@@ -270,7 +269,7 @@ def _export_nested_device_children(slot_device, node_folder, slot_name):
         export_path = os.path.join(slot_folder, nested_name + u".xml")
         export_path_bytes = ensure_unicode_path(export_path)
         write_native_preserving_io_maps(nested_device, export_path_bytes, recursive=True)
-        gc.collect()
+        # No per-device gc.collect() — see write_native success-path note.
         size = 0
         try:
             size = os.path.getsize(export_path_bytes)
@@ -310,7 +309,7 @@ def _export_device_children_to_folder(device_node, node_folder):
         export_path = os.path.join(node_folder, child_name + u".xml")
         export_path_bytes = ensure_unicode_path(export_path)
         write_native_preserving_io_maps(child_device, export_path_bytes, recursive=True)
-        gc.collect()
+        # No per-device gc.collect() — see write_native success-path note.
         nested_count += _export_nested_device_children(child_device, node_folder, child_name)
         size = 0
         map_count = 0
@@ -359,7 +358,7 @@ def _export_device_flat(device_node, devices_folder):
     export_path = os.path.join(devices_folder, child_name + u".xml")
     export_path_bytes = ensure_unicode_path(export_path)
     write_native(device_node, export_path_bytes, recursive=True)
-    gc.collect()
+    # No per-device gc.collect() — see write_native success-path note.
     size = 0
     try:
         size = os.path.getsize(export_path_bytes)
@@ -417,7 +416,7 @@ def export_device_tree_siblings(device_obj, device_folder, application, communic
             write_native_preserving_io_maps(
                 device_node, ensure_unicode_path(flat_path), recursive=False
             )
-            gc.collect()
+            # No per-device gc.collect() — see write_native success-path note.
             count, sub_count = _export_device_children_to_folder(device_node, node_folder)
             msg = (
                 u"  Device tree folder: "

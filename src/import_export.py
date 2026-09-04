@@ -112,12 +112,13 @@ def write_native(obj, path, recursive=False):
         except (IOError, OSError) as e:
             last_err = e
             if attempt + 1 < 8:
+                # File still locked by export_native / host — wait and free .NET refs.
                 time.sleep(0.15)
                 gc.collect()
             else:
                 raise
-    gc.collect()
-    time.sleep(0.05)
+    # No sleep/gc on the success path: per-file pause made large exports slow and
+    # was not required on XS Studio (checked on Miratorg). Retry above is enough.
     _normalize_export_timestamps(path_bytes)
 
 
