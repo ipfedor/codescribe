@@ -806,7 +806,20 @@ def resolve_native_import_parent(application_obj, dir_parent_obj, full_path):
     Native exports of RecipeManager children (e.g. PersistentVariables with recipe
     data) are written flat into application/ but must be imported under their
     real parent in the project tree.
+
+    For application/Equipment/, Libs/, Cycle/, Route/, … the filesystem folder is
+    the source of truth. CODESYS exports often set MetaObject ParentGuid to the
+    Application Guid while ParentSVNodeGuid / Path point at the folder — if we
+    follow ParentGuid, POUs land under Application and remove_orphans deletes
+    them (not listed as root-level files).
     """
+    if (
+        dir_parent_obj is not None
+        and application_obj is not None
+        and dir_parent_obj is not application_obj
+    ):
+        return dir_parent_obj
+
     meta = _peek_export_root_meta(full_path)
     if meta is None:
         return dir_parent_obj
