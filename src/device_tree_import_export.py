@@ -3,6 +3,8 @@
 import io
 import os
 import re
+import shutil
+import tempfile
 
 from import_export import (
     count_io_variable_mappings,
@@ -123,6 +125,31 @@ def _import_device_xml_under_parent(full_path, parent_obj, host_device_obj, chil
         + u".xml"
     )
     read_native_under_parent(full_path, parent_obj, host_device_obj)
+
+
+def _import_device_xml_via_temp_copy(full_path, parent_obj, host_device_obj, child_base):
+    """
+    Import from a temp copy so Guid-rewrite / CODESYS does not lock the source
+    (Errno 32 on large SHU / Modbus master XMLs).
+    """
+    src = ensure_unicode_path(full_path)
+    tmp_dir = tempfile.mkdtemp(prefix=u"codescribe_dev_")
+    tmp_path = ensure_unicode_path(os.path.join(tmp_dir, os.path.basename(src)))
+    try:
+        shutil.copy2(src, tmp_path)
+        _import_device_xml_under_parent(
+            tmp_path, parent_obj, host_device_obj, child_base
+        )
+    finally:
+        for name in os.listdir(tmp_dir):
+            try:
+                os.remove(ensure_unicode_path(os.path.join(tmp_dir, name)))
+            except (OSError, IOError):
+                pass
+        try:
+            os.rmdir(tmp_dir)
+        except (OSError, IOError):
+            pass
 
 
 def _find_child_device(parent_obj, name):
@@ -506,26 +533,48 @@ def _import_nested_device_xmls(folder_path, device_node, host_device_obj):
             continue
         child_base = _as_unicode_name(os.path.splitext(child_name)[0])
         sibling_dir = ensure_unicode_path(os.path.join(folder_path, child_base))
-        # Flat XML + same-named folder: folder owns module XMLs (A*.xml).
-        # Never remove/reimport the huge recursive flat (SHU1_3.xml ~30MB) —
-        # it often hits Errno 32 (file lock) or deletes the live slot on failure.
+        # Flat XML + same-named folder: folder owns slaves/modules (AB*.xml, A*.xml).
+        # Same pattern for EtherCAT SHU* and Modbus Master_COM_Port* / TCP Master.
+        # Do not remove+reimport the huge recursive flat when the live slot exists —
+        # Errno 32 / failed import would delete the master and skip the slave folder.
         if os.path.isdir(sibling_dir):
             slot_node = _find_child_device(device_node, child_base)
             if slot_node is None:
+                if not os.path.isfile(full_path):
+                    safe_print(
+                        u"  No live slot '"
+                        + child_base
+                        + u"' under "
+                        + device_node.get_name()
+                        + u" and no flat "
+                        + child_base
+                        + u".xml to create it — slaves in "
+                        + child_base
+                        + u"/ will be skipped."
+                    )
+                    continue
                 safe_print(
-                    u"  Skipping flat "
+                    u"  Device stub from flat (temp copy): "
                     + device_node.get_name()
                     + u"/"
                     + child_base
-                    + u".xml — no live slot '"
+                    + u".xml — then folder "
                     + child_base
-                    + u"' under "
-                    + device_node.get_name()
-                    + u". Recreate the coupler in the device tree, then re-import "
-                    + u"(modules come from folder "
-                    + child_base
-                    + u"/)."
+                    + u"/ supplies slaves"
                 )
+                try:
+                    _import_device_xml_via_temp_copy(
+                        full_path, device_node, host_device_obj, child_base
+                    )
+                except Exception as e:
+                    safe_print(
+                        u"Warning: device stub import failed for "
+                        + device_node.get_name()
+                        + u"/"
+                        + _as_unicode_name(child_name)
+                        + u": "
+                        + unicode(e)
+                    )
             else:
                 safe_print(
                     u"  Skipping flat "
