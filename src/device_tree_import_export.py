@@ -505,6 +505,40 @@ def _import_nested_device_xmls(folder_path, device_node, host_device_obj):
         if ext != u".xml":
             continue
         child_base = _as_unicode_name(os.path.splitext(child_name)[0])
+        sibling_dir = ensure_unicode_path(os.path.join(folder_path, child_base))
+        # Flat XML + same-named folder: folder owns module XMLs (A*.xml).
+        # Never remove/reimport the huge recursive flat (SHU1_3.xml ~30MB) —
+        # it often hits Errno 32 (file lock) or deletes the live slot on failure.
+        if os.path.isdir(sibling_dir):
+            slot_node = _find_child_device(device_node, child_base)
+            if slot_node is None:
+                safe_print(
+                    u"  Skipping flat "
+                    + device_node.get_name()
+                    + u"/"
+                    + child_base
+                    + u".xml — no live slot '"
+                    + child_base
+                    + u"' under "
+                    + device_node.get_name()
+                    + u". Recreate the coupler in the device tree, then re-import "
+                    + u"(modules come from folder "
+                    + child_base
+                    + u"/)."
+                )
+            else:
+                safe_print(
+                    u"  Skipping flat "
+                    + device_node.get_name()
+                    + u"/"
+                    + child_base
+                    + u".xml (using folder "
+                    + child_base
+                    + u"/)"
+                )
+            continue
+        if not os.path.isfile(full_path):
+            continue
         try:
             _import_device_xml_under_parent(
                 full_path, device_node, host_device_obj, child_base
