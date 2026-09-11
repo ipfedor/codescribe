@@ -42,6 +42,103 @@ _TIMESTAMP_LINE_RE = re.compile(
     re.MULTILINE,
 )
 
+# Do not load/unfold WORD→Bit0..Bit15 device XML in the 32-bit host.
+# Pl210_01 Modbus ARRAY[0..406] + CreateBitChannels → ~87 MB native export.
+_XML_FULL_READ_MAX_BYTES = 8 * 1024 * 1024
+_XML_BIT_HEAVY_MIN_SCAN_BYTES = 256 * 1024
+_XML_BIT_HEAVY_SCAN_BYTES = 1024 * 1024
+_XML_BIT_HEAVY_BIT0_MIN = 64
+_XML_BIT_HEAVY_BIT0_FAT_MIN = 16
+_XML_BIT_HEAVY_FAT_BYTES = 1024 * 1024
+_XML_BIT_HEAVY_ARRAY_MIN = 100
+_XML_CREATE_BIT_TRUE = u'Name="CreateBitChannels" Type="bool">True</'
+_XML_ARRAY_WORD_RE = re.compile(
+    ur"ARRAY\[0\.\.(\d+)\] OF (?:WORD|DWORD|BYTE)", re.IGNORECASE
+)
+
+
+def xml_bit_heavy_reason(path_bytes):
+    """Return a short reason if native XML must not be fully loaded, else None."""
+    path_bytes = ensure_unicode_path(path_bytes)
+    try:
+        size = os.path.getsize(path_bytes)
+    except OSError:
+        return None
+    if size > _XML_FULL_READ_MAX_BYTES:
+        return unicode(size) + u" bytes"
+    if size < _XML_BIT_HEAVY_MIN_SCAN_BYTES:
+        return None
+    bit0 = 0
+    create_bit_true = False
+    max_array_hi = -1
+    scanned = 0
+    overlap = u""
+    try:
+        with io.open(path_bytes, u"r", encoding=u"utf-8") as f:
+            while scanned < _XML_BIT_HEAVY_SCAN_BYTES:
+                chunk = f.read(65536)
+                if not chunk:
+                    break
+                scanned += len(chunk)
+                data = overlap + chunk
+                overlap = data[-80:]
+                bit0 += data.count(u">Bit0</")
+                if (not create_bit_true) and (_XML_CREATE_BIT_TRUE in data):
+                    create_bit_true = True
+                for m in _XML_ARRAY_WORD_RE.finditer(data):
+                    hi = int(m.group(1))
+                    if hi > max_array_hi:
+                        max_array_hi = hi
+                if bit0 >= _XML_BIT_HEAVY_BIT0_MIN or (
+                    bit0 >= _XML_BIT_HEAVY_BIT0_FAT_MIN and size > _XML_BIT_HEAVY_FAT_BYTES
+                ):
+                    return unicode(bit0) + u" Bit0 channels"
+                if create_bit_true and max_array_hi >= _XML_BIT_HEAVY_ARRAY_MIN:
+                    return (
+                        u"CreateBitChannels ARRAY[0.."
+                        + unicode(max_array_hi)
+                        + u"]"
+                    )
+    except (IOError, OSError, UnicodeError):
+        return None
+    return None
+
+
+def xml_is_bit_heavy(path_bytes):
+    return xml_bit_heavy_reason(path_bytes) is not None
+
+
+def skip_bit_heavy_native_import(path_bytes, live_name=None):
+    """
+    True when import_native must not run (32-bit OOM on bit-expanded device XML).
+
+    Caller must not remove the live device when this is True and an object
+    with ``live_name`` already exists in the project.
+    """
+    reason = xml_bit_heavy_reason(path_bytes)
+    if reason is None:
+        return False
+    base = os.path.basename(ensure_unicode_path(path_bytes))
+    if live_name:
+        safe_print(
+            u"  Keep live device "
+            + live_name
+            + u" — skip bit-heavy import "
+            + base
+            + u" ("
+            + reason
+            + u")"
+        )
+    else:
+        safe_print(
+            u"  Skip bit-heavy import "
+            + base
+            + u" ("
+            + reason
+            + u"); not creating a new device from this XML"
+        )
+    return True
+
 
 def _normalize_export_timestamps_once(path_bytes):
     try:
@@ -50,7 +147,7 @@ def _normalize_export_timestamps_once(path_bytes):
         return
 
     # Very large native exports: skip post-processing to limit peak memory in CodeSYS.
-    if size > 8 * 1024 * 1024:
+    if size > _XML_FULL_READ_MAX_BYTES:
         return
 
     tmp_path = path_bytes + u".codescribe_ts_tmp"
@@ -245,12 +342,32 @@ def write_native_preserving_io_maps(obj, path, recursive=False):
     path_bytes = ensure_unicode_path(path)
     previous = u""
     if os.path.isfile(path_bytes):
-        try:
-            with io.open(path_bytes, u"r", encoding=u"utf-8") as f:
-                previous = f.read()
-        except (IOError, OSError):
-            previous = u""
+        prev_reason = xml_bit_heavy_reason(path_bytes)
+        if prev_reason:
+            safe_print(
+                u"  Skip unfolding bit-heavy I/O XML: "
+                + os.path.basename(path_bytes)
+                + u" ("
+                + prev_reason
+                + u")"
+            )
+        else:
+            try:
+                with io.open(path_bytes, u"r", encoding=u"utf-8") as f:
+                    previous = f.read()
+            except (IOError, OSError):
+                previous = u""
     write_native(obj, path_bytes, recursive=recursive)
+    new_reason = xml_bit_heavy_reason(path_bytes)
+    if new_reason:
+        safe_print(
+            u"  Skip I/O mapping post-process for bit-heavy export: "
+            + os.path.basename(path_bytes)
+            + u" ("
+            + new_reason
+            + u")"
+        )
+        return False
     try:
         with io.open(path_bytes, u"r", encoding=u"utf-8") as f:
             new_text = f.read()
@@ -323,6 +440,9 @@ def read_native_under_parent(path, parent_obj, host_obj=None):
     temps = []
     work_path = original_path
     try:
+        if skip_bit_heavy_native_import(original_path):
+            return False
+
         try:
             with io.open(original_path, u"r", encoding=u"utf-8") as f:
                 src_text = f.read()
@@ -921,6 +1041,16 @@ def _rewrite_native_device_import_guids(
     live_parent = _normalize_object_guid(live_parent_guid)
     live_host = _normalize_object_guid(live_host_guid)
     if not live_parent and not live_host:
+        return False
+    heavy = xml_bit_heavy_reason(src_bytes)
+    if heavy:
+        safe_print(
+            u"  Skip Guid rewrite for bit-heavy device XML: "
+            + os.path.basename(src_bytes)
+            + u" ("
+            + heavy
+            + u")"
+        )
         return False
     with io.open(src_bytes, "r", encoding="utf-8") as f:
         text = f.read()

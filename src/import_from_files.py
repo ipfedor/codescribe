@@ -91,11 +91,13 @@ def import_directory_child(
         safe_print(u"Skipping import (template object): " + child)
         return
 
+    filename, ext = os.path.splitext(child)
+    if ext == u".xml" and skip_bit_heavy_native_import(full_path, live_name=filename):
+        return
+
     remove_object_for_import_child(
         child, dir_path, dir_parent_obj, application_obj
     )
-
-    filename, ext = os.path.splitext(child)
 
     if os.path.isdir(full_path):
         import_folder(

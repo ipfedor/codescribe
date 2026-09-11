@@ -9,8 +9,10 @@ import tempfile
 from import_export import (
     count_io_variable_mappings,
     read_native_under_parent,
+    skip_bit_heavy_native_import,
     write_native,
     write_native_preserving_io_maps,
+    xml_is_bit_heavy,
 )
 from object_type import ObjectType, get_object_type
 from util import *
@@ -116,6 +118,10 @@ def _remove_child_device_by_name(parent_obj, base_name):
 
 def _import_device_xml_under_parent(full_path, parent_obj, host_device_obj, child_base):
     """Remove existing same-name child, then import_native under parent."""
+    existing = _find_child_device(parent_obj, child_base)
+    live_name = existing.get_name() if existing is not None else None
+    if skip_bit_heavy_native_import(full_path, live_name=live_name):
+        return
     _remove_child_device_by_name(parent_obj, child_base)
     safe_print(
         u"  Device import: "
@@ -133,6 +139,11 @@ def _import_device_xml_via_temp_copy(full_path, parent_obj, host_device_obj, chi
     (Errno 32 on large SHU / Modbus master XMLs).
     """
     src = ensure_unicode_path(full_path)
+    if xml_is_bit_heavy(src):
+        _import_device_xml_under_parent(
+            src, parent_obj, host_device_obj, child_base
+        )
+        return
     tmp_dir = tempfile.mkdtemp(prefix=u"codescribe_dev_")
     tmp_path = ensure_unicode_path(os.path.join(tmp_dir, os.path.basename(src)))
     try:
@@ -340,10 +351,13 @@ def _export_device_children_to_folder(device_node, node_folder):
         nested_count += _export_nested_device_children(child_device, node_folder, child_name)
         size = 0
         map_count = 0
+        bit_heavy = False
         try:
             size = os.path.getsize(export_path_bytes)
-            with io.open(export_path_bytes, u"r", encoding=u"utf-8") as f:
-                map_count = count_io_variable_mappings(f.read())
+            bit_heavy = xml_is_bit_heavy(export_path_bytes)
+            if not bit_heavy:
+                with io.open(export_path_bytes, u"r", encoding=u"utf-8") as f:
+                    map_count = count_io_variable_mappings(f.read())
         except (IOError, OSError):
             pass
         if _is_probably_empty_native_export(export_path_bytes):
@@ -355,6 +369,16 @@ def _export_device_children_to_folder(device_node, node_folder):
                 + u" ("
                 + unicode(size)
                 + u" bytes)"
+            )
+        elif bit_heavy:
+            safe_print(
+                u"  Device nested: "
+                + device_node.get_name()
+                + u"/"
+                + child_name
+                + u" ("
+                + unicode(size)
+                + u" bytes, bit-heavy XML not unfolded)"
             )
         else:
             safe_print(
@@ -705,11 +729,12 @@ def _import_one_device_tree_entry(host_obj, devices_folder, entry, device_obj):
             # Try to create via flat stub XML (e.g. A15_COM1.xml).
             flat_stub = _flat_parent_stub_path(devices_folder, entry_name)
             if os.path.isfile(ensure_unicode_path(flat_stub)):
-                safe_print(u"  Device stub create: " + entry_name + u".xml -> PLC")
-                read_native_under_parent(
-                    ensure_unicode_path(flat_stub), device_obj, host_obj
-                )
-                device_node = _find_device_tree_node(device_obj, entry_name)
+                if not skip_bit_heavy_native_import(ensure_unicode_path(flat_stub)):
+                    safe_print(u"  Device stub create: " + entry_name + u".xml -> PLC")
+                    read_native_under_parent(
+                        ensure_unicode_path(flat_stub), device_obj, host_obj
+                    )
+                    device_node = _find_device_tree_node(device_obj, entry_name)
         if device_node is None:
             safe_print(
                 u"Skipping device-tree folder "

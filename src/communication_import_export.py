@@ -5,8 +5,10 @@ import re
 
 from import_export import (
     read_native_under_parent,
+    skip_bit_heavy_native_import,
     write_native,
     write_native_preserving_io_maps,
+    xml_is_bit_heavy,
 )
 from object_type import ObjectType
 from util import *
@@ -96,20 +98,41 @@ def import_communication(communication_obj, device_folder, host_device_obj=None)
             continue
 
         safe_print(u"  Communication clear+import: " + name + u"/")
+        xml_paths = []
+        for child_name in sorted(os.listdir(full_path), key=_natural_sort_key):
+            _, ext = os.path.splitext(child_name)
+            if ext != u".xml":
+                continue
+            xml_paths.append(
+                (
+                    os.path.splitext(child_name)[0],
+                    ensure_unicode_path(os.path.join(full_path, child_name)),
+                )
+            )
+        keep_names = set()
         for child in list(top_level_device.get_children()):
+            child_xml = ensure_unicode_path(
+                os.path.join(full_path, child.get_name() + u".xml")
+            )
+            if os.path.isfile(child_xml) and skip_bit_heavy_native_import(
+                child_xml, live_name=child.get_name()
+            ):
+                keep_names.add(child.get_name())
+                continue
             child.remove()
 
         try:
-            for child_name in sorted(os.listdir(full_path), key=_natural_sort_key):
-                _, ext = os.path.splitext(child_name)
-                if ext != u".xml":
+            for child_base, import_file_path in xml_paths:
+                if child_base in keep_names:
                     continue
-                import_file_path = ensure_unicode_path(os.path.join(full_path, child_name))
+                if skip_bit_heavy_native_import(import_file_path):
+                    continue
                 safe_print(
                     u"  Communication import: "
                     + name
                     + u"/"
-                    + child_name
+                    + child_base
+                    + u".xml"
                 )
                 read_native_under_parent(
                     import_file_path, top_level_device, host_device_obj
