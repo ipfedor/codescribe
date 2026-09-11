@@ -8,7 +8,6 @@ from import_export import (
     skip_bit_heavy_native_import,
     write_native,
     write_native_preserving_io_maps,
-    xml_is_bit_heavy,
 )
 from object_type import ObjectType
 from util import *
@@ -124,8 +123,6 @@ def import_communication(communication_obj, device_folder, host_device_obj=None)
         try:
             for child_base, import_file_path in xml_paths:
                 if child_base in keep_names:
-                    continue
-                if skip_bit_heavy_native_import(import_file_path):
                     continue
                 safe_print(
                     u"  Communication import: "

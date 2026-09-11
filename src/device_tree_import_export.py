@@ -139,11 +139,7 @@ def _import_device_xml_via_temp_copy(full_path, parent_obj, host_device_obj, chi
     (Errno 32 on large SHU / Modbus master XMLs).
     """
     src = ensure_unicode_path(full_path)
-    if xml_is_bit_heavy(src):
-        _import_device_xml_under_parent(
-            src, parent_obj, host_device_obj, child_base
-        )
-        return
+    # Always copy — bit-heavy masters still need stub create for AB* slave folders.
     tmp_dir = tempfile.mkdtemp(prefix=u"codescribe_dev_")
     tmp_path = ensure_unicode_path(os.path.join(tmp_dir, os.path.basename(src)))
     try:

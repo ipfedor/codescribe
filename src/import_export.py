@@ -47,13 +47,26 @@ _TIMESTAMP_LINE_RE = re.compile(
 _XML_FULL_READ_MAX_BYTES = 8 * 1024 * 1024
 _XML_BIT_HEAVY_MIN_SCAN_BYTES = 256 * 1024
 _XML_BIT_HEAVY_SCAN_BYTES = 1024 * 1024
-_XML_BIT_HEAVY_BIT0_MIN = 64
-_XML_BIT_HEAVY_BIT0_FAT_MIN = 16
-_XML_BIT_HEAVY_FAT_BYTES = 1024 * 1024
+_XML_BIT_HEAVY_BIT0_MIN = 128
 _XML_BIT_HEAVY_ARRAY_MIN = 100
 _XML_CREATE_BIT_TRUE = u'Name="CreateBitChannels" Type="bool">True</'
 _XML_ARRAY_WORD_RE = re.compile(
     ur"ARRAY\[0\.\.(\d+)\] OF (?:WORD|DWORD|BYTE)", re.IGNORECASE
+)
+_PARENT_GUID_LINE_RE = re.compile(
+    ur'^(?P<pre>.*<Single Name="ParentGuid" Type="System\.Guid">)'
+    ur'[^<]*(?P<suf></Single>.*)$',
+    re.IGNORECASE,
+)
+_PARENT_SV_GUID_LINE_RE = re.compile(
+    ur'^(?P<pre>.*<Single Name="ParentSVNodeGuid" Type="System\.Guid">)'
+    ur'[^<]*(?P<suf></Single>.*)$',
+    re.IGNORECASE,
+)
+_HOST_GUID_LINE_RE = re.compile(
+    ur'^(?P<pre>.*<Single Name="HostObjectGuid" Type="System\.Guid">)'
+    ur'[^<]*(?P<suf></Single>.*)$',
+    re.IGNORECASE,
 )
 
 
@@ -89,9 +102,7 @@ def xml_bit_heavy_reason(path_bytes):
                     hi = int(m.group(1))
                     if hi > max_array_hi:
                         max_array_hi = hi
-                if bit0 >= _XML_BIT_HEAVY_BIT0_MIN or (
-                    bit0 >= _XML_BIT_HEAVY_BIT0_FAT_MIN and size > _XML_BIT_HEAVY_FAT_BYTES
-                ):
+                if bit0 >= _XML_BIT_HEAVY_BIT0_MIN:
                     return unicode(bit0) + u" Bit0 channels"
                 if create_bit_true and max_array_hi >= _XML_BIT_HEAVY_ARRAY_MIN:
                     return (
@@ -110,33 +121,26 @@ def xml_is_bit_heavy(path_bytes):
 
 def skip_bit_heavy_native_import(path_bytes, live_name=None):
     """
-    True when import_native must not run (32-bit OOM on bit-expanded device XML).
+    True when an existing live device must be kept (do not remove + reimport).
 
-    Caller must not remove the live device when this is True and an object
-    with ``live_name`` already exists in the project.
+    Large / bit-expanded XML is still imported when ``live_name`` is None
+    (stub create for slave folders), but without Python full-text unfold.
     """
     reason = xml_bit_heavy_reason(path_bytes)
     if reason is None:
         return False
+    if not live_name:
+        return False
     base = os.path.basename(ensure_unicode_path(path_bytes))
-    if live_name:
-        safe_print(
-            u"  Keep live device "
-            + live_name
-            + u" — skip bit-heavy import "
-            + base
-            + u" ("
-            + reason
-            + u")"
-        )
-    else:
-        safe_print(
-            u"  Skip bit-heavy import "
-            + base
-            + u" ("
-            + reason
-            + u"); not creating a new device from this XML"
-        )
+    safe_print(
+        u"  Keep live device "
+        + live_name
+        + u" — skip bit-heavy import "
+        + base
+        + u" ("
+        + reason
+        + u")"
+    )
     return True
 
 
@@ -440,8 +444,31 @@ def read_native_under_parent(path, parent_obj, host_obj=None):
     temps = []
     work_path = original_path
     try:
-        if skip_bit_heavy_native_import(original_path):
-            return False
+        heavy = xml_bit_heavy_reason(original_path)
+        if heavy:
+            # Need the device in the tree (e.g. Modbus master stub for AB*),
+            # but never load the whole XML into Python unicode / I/O unfold.
+            safe_print(
+                u"  Import without unfold (bit-heavy): "
+                + os.path.basename(original_path)
+                + u" ("
+                + heavy
+                + u")"
+            )
+            import_path = original_path
+            if live_parent or live_host:
+                guid_tmp = original_path + u".codescribe_device_guid.tmp"
+                if _rewrite_native_device_import_guids(
+                    original_path,
+                    live_parent,
+                    guid_tmp,
+                    live_host_guid=live_host,
+                    stream=True,
+                ):
+                    temps.append(guid_tmp)
+                    import_path = guid_tmp
+            read_native(import_path, parent_obj)
+            return True
 
         try:
             with io.open(original_path, u"r", encoding=u"utf-8") as f:
@@ -502,6 +529,7 @@ def read_native_under_parent(path, parent_obj, host_obj=None):
                 + u"); retrying original XML"
             )
             read_native(original_path, parent_obj)
+        return True
     finally:
         for tmp in temps:
             try:
@@ -1026,8 +1054,40 @@ def _rewrite_native_parent_guids(src_path, live_parent_guid, dest_path):
     )
 
 
+def _rewrite_native_device_import_guids_stream(
+    src_bytes, dest_bytes, live_parent, live_host
+):
+    """Line-stream Guid rewrite — no full-file unicode load."""
+    changed = False
+    parent_done = False
+    parent_sv_done = False
+    with io.open(src_bytes, u"r", encoding=u"utf-8") as src:
+        with io.open(dest_bytes, u"w", encoding=u"utf-8") as dst:
+            for line in src:
+                out = line
+                if live_parent and (not parent_done):
+                    m = _PARENT_GUID_LINE_RE.match(line.rstrip(u"\r\n"))
+                    if m:
+                        out = m.group(u"pre") + live_parent + m.group(u"suf") + u"\n"
+                        parent_done = True
+                        changed = True
+                if live_parent and (not parent_sv_done):
+                    m = _PARENT_SV_GUID_LINE_RE.match(out.rstrip(u"\r\n"))
+                    if m:
+                        out = m.group(u"pre") + live_parent + m.group(u"suf") + u"\n"
+                        parent_sv_done = True
+                        changed = True
+                if live_host:
+                    m = _HOST_GUID_LINE_RE.match(out.rstrip(u"\r\n"))
+                    if m:
+                        out = m.group(u"pre") + live_host + m.group(u"suf") + u"\n"
+                        changed = True
+                dst.write(out)
+    return changed
+
+
 def _rewrite_native_device_import_guids(
-    src_path, live_parent_guid, dest_path, live_host_guid=None
+    src_path, live_parent_guid, dest_path, live_host_guid=None, stream=False
 ):
     """
     Rewrite Guids so native device XML imports under the live project tree.
@@ -1035,6 +1095,8 @@ def _rewrite_native_device_import_guids(
     - First ParentGuid / ParentSVNodeGuid → live parent (only root entry;
       nested IsRoot=False rows keep their exported parent chain).
     - All HostObjectGuid → live PLC device (I/O mapping host).
+
+    ``stream=True`` rewrites line-by-line (for bit-heavy / >8MB XML).
     """
     src_bytes = ensure_unicode_path(src_path)
     dest_bytes = ensure_unicode_path(dest_path)
@@ -1042,16 +1104,16 @@ def _rewrite_native_device_import_guids(
     live_host = _normalize_object_guid(live_host_guid)
     if not live_parent and not live_host:
         return False
-    heavy = xml_bit_heavy_reason(src_bytes)
-    if heavy:
-        safe_print(
-            u"  Skip Guid rewrite for bit-heavy device XML: "
-            + os.path.basename(src_bytes)
-            + u" ("
-            + heavy
-            + u")"
+    if stream or xml_is_bit_heavy(src_bytes):
+        changed = _rewrite_native_device_import_guids_stream(
+            src_bytes, dest_bytes, live_parent, live_host
         )
-        return False
+        if changed:
+            safe_print(
+                u"  Stream-rewrote device import Guids for "
+                + os.path.basename(src_bytes)
+            )
+        return changed
     with io.open(src_bytes, "r", encoding="utf-8") as f:
         text = f.read()
 
