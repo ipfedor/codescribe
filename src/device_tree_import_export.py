@@ -41,7 +41,7 @@ def _as_unicode_name(name):
 
 
 def _natural_sort_key(name):
-    """A1, A2, … A10 (not lexicographic A1, A10, A2) — bus slot order."""
+    """A1, A2, … A10 (not lexicographic A1, A10, A2)."""
     name = _as_unicode_name(name)
     parts = re.split(ur"(\d+)", name)
     key = []
@@ -51,6 +51,71 @@ def _natural_sort_key(name):
         else:
             key.append((1, part.lower()))
     return key
+
+
+# First fixed IEC address ≈ physical order on Owen expansion / EtherCAT.
+# A15 (%IW72) must import after A21–A23 (%IW44–52); name-natural puts A15 earlier.
+_IEC_ADDR_RE = re.compile(
+    ur'Name="(?:IECAddressFixed|ActualAddr)" Type="string">'
+    ur"(%(?P<io>[IQ])(?P<kind>[XWD])(?P<word>\d+)(?:\.(?P<bit>\d+))?)",
+    re.IGNORECASE,
+)
+_BUS_ADDR_SCAN_BYTES = 256 * 1024
+_BUS_ADDR_MISSING = (2, 10 ** 9, 0)
+
+
+def _iec_address_sort_tuple(addr):
+    """(%IW0 / %IX52.0 / %QX6.0) → sortable (io, word, bit); I before Q."""
+    if not addr:
+        return _BUS_ADDR_MISSING
+    m = re.match(
+        ur"^%(?P<io>[IQ])(?P<kind>[XWD])(?P<word>\d+)(?:\.(?P<bit>\d+))?$",
+        addr,
+        re.IGNORECASE,
+    )
+    if not m:
+        return _BUS_ADDR_MISSING
+    io = 0 if m.group(u"io").upper() == u"I" else 1
+    word = int(m.group(u"word"))
+    bit = int(m.group(u"bit") or 0)
+    return (io, word, bit)
+
+
+def _peek_first_iec_address(xml_path):
+    """Cheap head-scan for first non-empty fixed IEC address in a device XML."""
+    path = ensure_unicode_path(xml_path)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with io.open(path, u"r", encoding=u"utf-8") as f:
+            data = f.read(_BUS_ADDR_SCAN_BYTES)
+    except (IOError, OSError, UnicodeError):
+        return None
+    for m in _IEC_ADDR_RE.finditer(data):
+        return m.group(1)
+    return None
+
+
+def _bus_order_sort_tuple(folder_path, entry_name):
+    """
+    Sort key for bus children: IEC address first, then natural name.
+
+    For ``Name/`` folders, peek sibling ``Name.xml`` when present.
+    """
+    folder_path = ensure_unicode_path(folder_path)
+    entry_name = _as_unicode_name(entry_name)
+    full_path = ensure_unicode_path(os.path.join(folder_path, entry_name))
+    xml_path = full_path
+    if os.path.isdir(full_path):
+        sibling = ensure_unicode_path(os.path.join(folder_path, entry_name + u".xml"))
+        if os.path.isfile(sibling):
+            xml_path = sibling
+        else:
+            return _BUS_ADDR_MISSING + (_natural_sort_key(entry_name),)
+    elif not entry_name.lower().endswith(u".xml"):
+        return _BUS_ADDR_MISSING + (_natural_sort_key(entry_name),)
+    addr = _peek_first_iec_address(xml_path)
+    return _iec_address_sort_tuple(addr) + (_natural_sort_key(entry_name),)
 
 
 def no_export_device_tree(device_obj):
@@ -504,11 +569,13 @@ def _tracked_device_names(devices_folder):
 
 
 def _import_entry_sort_key(folder_path, entry_name):
-    """Import slot XML before subfolders (A15.xml before A15/)."""
+    """
+    Import order: XML before same-named folder; within each group by bus IEC
+    address (then natural name). Keeps A15 after A21–A23 on Owen expansion.
+    """
     full_path = ensure_unicode_path(os.path.join(folder_path, entry_name))
-    if os.path.isdir(full_path):
-        return (1, _natural_sort_key(entry_name))
-    return (0, _natural_sort_key(entry_name))
+    is_dir = 1 if os.path.isdir(full_path) else 0
+    return (is_dir,) + _bus_order_sort_tuple(folder_path, entry_name)
 
 
 def _import_nested_device_xmls(folder_path, device_node, host_device_obj):
