@@ -813,16 +813,18 @@ SUB_POU_MEMBER_TYPES = (
     ObjectType.TRANSITION,
 )
 
+RECIPE_MANAGER_TYPE_GUID = u"09ecc42e-586d-4a08-932f-5bdcac20bb55"
+PERSISTENT_VARIABLES_TYPE_GUID = u"6b3dfb6a-1865-4356-a39b-1fe0ef89651c"
+GVL_PERSISTENT_TYPE_GUID = u"261bd6e6-249c-4232-bb6f-84c2fbeef430"
+
 # Native exports kept for reference / diff only — live in .project template, not round-trip import.
 IMPORT_SKIP_NATIVE_TYPE_GUIDS = frozenset([
     u"ae1de277-a207-4a28-9efb-456c06bd52f3",  # Task configuration
     u"f18bec89-9fef-401d-9953-2f11739a6808",  # Visualisation
     u"4d3fdb8f-ab50-4c35-9d3a-d4bb9bb9a628",  # Visualization manager
+    RECIPE_MANAGER_TYPE_GUID,  # LMGuids / bindings are project-local
+    PERSISTENT_VARIABLES_TYPE_GUID,  # recipe defaults & VarName ids — sync in IDE only
 ])
-
-RECIPE_MANAGER_TYPE_GUID = u"09ecc42e-586d-4a08-932f-5bdcac20bb55"
-PERSISTENT_VARIABLES_TYPE_GUID = u"6b3dfb6a-1865-4356-a39b-1fe0ef89651c"
-GVL_PERSISTENT_TYPE_GUID = u"261bd6e6-249c-4232-bb6f-84c2fbeef430"
 
 _EXPORT_ROOT_TYPE_GUID_RE = re.compile(
     ur'<Single Name="TypeGuid" Type="System\.Guid">([^<]+)</Single>',
@@ -1176,11 +1178,17 @@ def _rewrite_native_device_import_guids(
 
 def should_skip_application_import_file(child, full_path):
     """
-    Task config, visualisations and vis manager are exported for diff/reference but
-    must not be imported — GUIDs and device bindings are project-template specific.
+    Task config, visualisations, vis manager, recipe manager and recipe persistent
+    variables are exported for diff/reference but must not be imported — GUIDs and
+    bindings are project-template specific; RETAIN GVL is applied via .gvl.st only.
     """
     filename, ext = os.path.splitext(child)
     if filename.endswith(u".vis") and ext == u".xml":
+        return True
+    if ext == u".xml" and filename in (
+        u"RecipeManager",
+        u"PersistentVariables",
+    ):
         return True
     if ext != u".xml":
         return False
