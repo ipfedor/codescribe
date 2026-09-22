@@ -614,7 +614,9 @@ def export_gvl(child_obj, parent_obj, parent_folder_path, export_child_fn):
 
 def import_gvl(child, dir_path, dir_parent_obj, import_dir_fn):
     """
-    Import the native xml and then overwrite the textual definition with the structured text.
+    Import GVL from structured text; optional native .gvl.xml sidecar for non-persistent GVL.
+
+    GVL_PERSISTENT (RETAIN): only .gvl.st is applied; .gvl.xml is kept for export/diff only.
     """
     name, ext = os.path.splitext(child)
 
@@ -628,7 +630,23 @@ def import_gvl(child, dir_path, dir_parent_obj, import_dir_fn):
 
     gvl_xml_path = os.path.join(dir_path, name + u".gvl.xml")
     gvl_xml_path_bytes = ensure_unicode_path(gvl_xml_path)
-    if os.path.exists(gvl_xml_path_bytes):
+    persistent_st_only = (
+        os.path.exists(gvl_xml_path_bytes)
+        and _gvl_sidecar_is_persistent(gvl_xml_path_bytes)
+    )
+    if persistent_st_only:
+        imported_obj = first_of_type_or_none(
+            dir_parent_obj.find(name), ObjectType.GVL_PERSISTENT
+        )
+        if imported_obj is None:
+            imported_obj = find_gvl_or_error(
+                dir_parent_obj,
+                name,
+                name
+                + u" persistent GVL must exist in project (ST-only import, .gvl.xml skipped)",
+            )
+        safe_print(u"Persistent GVL ST-only import (skip .gvl.xml): " + name)
+    elif os.path.exists(gvl_xml_path_bytes):
         import_native(gvl_xml_path, dir_path, dir_parent_obj, import_dir_fn)  # import_native ожидает путь
         imported_obj = find_gvl_or_error(
             dir_parent_obj,
@@ -804,6 +822,7 @@ IMPORT_SKIP_NATIVE_TYPE_GUIDS = frozenset([
 
 RECIPE_MANAGER_TYPE_GUID = u"09ecc42e-586d-4a08-932f-5bdcac20bb55"
 PERSISTENT_VARIABLES_TYPE_GUID = u"6b3dfb6a-1865-4356-a39b-1fe0ef89651c"
+GVL_PERSISTENT_TYPE_GUID = u"261bd6e6-249c-4232-bb6f-84c2fbeef430"
 
 _EXPORT_ROOT_TYPE_GUID_RE = re.compile(
     ur'<Single Name="TypeGuid" Type="System\.Guid">([^<]+)</Single>',
@@ -869,6 +888,15 @@ def _peek_export_root_type_guid(full_path):
     if not meta:
         return None
     return meta.get(u"type_guid")
+
+
+def _gvl_sidecar_is_persistent(gvl_xml_path):
+    """True if a *.gvl.xml sidecar is a RETAIN / GVL_PERSISTENT export."""
+    meta = _peek_export_root_meta(gvl_xml_path)
+    return (
+        meta is not None
+        and meta.get(u"type_guid") == _normalize_object_guid(GVL_PERSISTENT_TYPE_GUID)
+    )
 
 
 def _object_guid(obj):
@@ -1204,6 +1232,12 @@ def remove_object_for_import_child(child, dir_path, dir_parent_obj, application_
         if ext != u".st":
             return
         name = filename.replace(u".gvl", u"")
+        gvl_xml_path = os.path.join(dir_path, name + u".gvl.xml")
+        if os.path.isfile(ensure_unicode_path(gvl_xml_path)) and _gvl_sidecar_is_persistent(
+            gvl_xml_path
+        ):
+            safe_print(u"Keeping persistent GVL (ST-only import): " + name)
+            return
         _remove_named_child(
             dir_parent_obj, name, (ObjectType.GVL, ObjectType.GVL_PERSISTENT)
         )
