@@ -818,12 +818,13 @@ PERSISTENT_VARIABLES_TYPE_GUID = u"6b3dfb6a-1865-4356-a39b-1fe0ef89651c"
 GVL_PERSISTENT_TYPE_GUID = u"261bd6e6-249c-4232-bb6f-84c2fbeef430"
 
 # Native exports kept for reference / diff only — live in .project template, not round-trip import.
+# RecipeManager stays skipped (LMGuids). PersistentVariables is imported under the live
+# RecipeManager so add/remove of retain VarNames round-trips from disk.
 IMPORT_SKIP_NATIVE_TYPE_GUIDS = frozenset([
     u"ae1de277-a207-4a28-9efb-456c06bd52f3",  # Task configuration
     u"f18bec89-9fef-401d-9953-2f11739a6808",  # Visualisation
     u"4d3fdb8f-ab50-4c35-9d3a-d4bb9bb9a628",  # Visualization manager
     RECIPE_MANAGER_TYPE_GUID,  # LMGuids / bindings are project-local
-    PERSISTENT_VARIABLES_TYPE_GUID,  # recipe defaults & VarName ids — sync in IDE only
 ])
 
 _EXPORT_ROOT_TYPE_GUID_RE = re.compile(
@@ -1002,16 +1003,22 @@ def resolve_native_import_parent(application_obj, dir_parent_obj, full_path):
     if meta is None:
         return dir_parent_obj
 
+    # Recipe PersistentVariables always belongs under live RecipeManager — do not
+    # trust stale ParentGuid (may point at Application or another session).
+    if meta.get(u"type_guid") == _normalize_object_guid(PERSISTENT_VARIABLES_TYPE_GUID):
+        recipe_manager = _find_recipe_manager(application_obj)
+        if recipe_manager is not None:
+            return recipe_manager
+        safe_print(
+            u"Warning: RecipeManager not found; cannot place PersistentVariables"
+        )
+        return dir_parent_obj
+
     parent_guid = meta.get(u"parent_guid")
     if parent_guid:
         found = _find_object_by_guid_subtree(application_obj, parent_guid)
         if found is not None:
             return found
-
-    if meta.get(u"type_guid") == PERSISTENT_VARIABLES_TYPE_GUID:
-        recipe_manager = _find_recipe_manager(application_obj)
-        if recipe_manager is not None:
-            return recipe_manager
 
     if _object_guid(dir_parent_obj) == parent_guid:
         return dir_parent_obj
@@ -1061,7 +1068,19 @@ def should_defer_native_import(
     if should_skip_application_import_file(child, full_path):
         return False
     meta = _peek_export_root_meta(full_path)
-    if meta is None or not meta.get(u"parent_guid"):
+    if meta is None:
+        return False
+
+    # After PersistentVars.gvl.st (more dots → later in first pass). Dot-sort alone
+    # would import PersistentVariables.xml before the RETAIN GVL ST update.
+    if (
+        filename == u"PersistentVariables"
+        or meta.get(u"type_guid")
+        == _normalize_object_guid(PERSISTENT_VARIABLES_TYPE_GUID)
+    ):
+        return True
+
+    if not meta.get(u"parent_guid"):
         return False
     parent_guid = meta[u"parent_guid"]
     if _object_guid(application_obj) == parent_guid:
@@ -1178,17 +1197,16 @@ def _rewrite_native_device_import_guids(
 
 def should_skip_application_import_file(child, full_path):
     """
-    Task config, visualisations, vis manager, recipe manager and recipe persistent
-    variables are exported for diff/reference but must not be imported — GUIDs and
-    bindings are project-template specific; RETAIN GVL is applied via .gvl.st only.
+    Task config, visualisations, vis manager and RecipeManager are exported for
+    diff/reference but must not be imported (template / LMGuid bindings).
+
+    PersistentVariables.xml is imported under the live RecipeManager.
+    RETAIN GVL (PersistentVars) is applied via .gvl.st only; its .gvl.xml is skipped.
     """
     filename, ext = os.path.splitext(child)
     if filename.endswith(u".vis") and ext == u".xml":
         return True
-    if ext == u".xml" and filename in (
-        u"RecipeManager",
-        u"PersistentVariables",
-    ):
+    if ext == u".xml" and filename == u"RecipeManager":
         return True
     if ext != u".xml":
         return False
