@@ -4,6 +4,8 @@ import gc
 import io
 import os
 import re
+import shutil
+import tempfile
 import time
 
 from object_type import ObjectType, get_object_type
@@ -196,31 +198,102 @@ def _normalize_export_timestamps(path_bytes, retries=8, delay_sec=0.15):
     )
 
 
+def _native_export_size(path_bytes):
+    try:
+        return os.path.getsize(path_bytes)
+    except (IOError, OSError):
+        return -1
+
+
+def _snapshot_previous_native_export(path_bytes):
+    """
+    Find a non-hollow previous native XML to restore if export_native returns a stub.
+
+    Returns (restore_path, is_temp). Staging writes have no prior file at path —
+    fall back to the live export folder (suffix stripped).
+    """
+    path_bytes = ensure_unicode_path(path_bytes)
+    live = live_export_path_from_staging(path_bytes)
+    sources = []
+    if os.path.isfile(path_bytes):
+        sources.append(path_bytes)
+    if live != path_bytes and os.path.isfile(live):
+        sources.append(live)
+    for src in sources:
+        if _native_export_size(src) <= EMPTY_NATIVE_EXPORT_MAX_BYTES:
+            continue
+        if src == path_bytes:
+            fd, tmp = tempfile.mkstemp(prefix=u"codescribe_native_", suffix=u".xml")
+            os.close(fd)
+            tmp = ensure_unicode_path(tmp)
+            shutil.copy2(src, tmp)
+            return tmp, True
+        return src, False
+    return None, False
+
+
+def _restore_if_hollow_native_export(path_bytes, restore_from):
+    """Replace empty EntryList stub with the previous full native export."""
+    if not restore_from:
+        return False
+    path_bytes = ensure_unicode_path(path_bytes)
+    new_size = _native_export_size(path_bytes)
+    if new_size < 0 or new_size > EMPTY_NATIVE_EXPORT_MAX_BYTES:
+        return False
+    prev_size = _native_export_size(restore_from)
+    if prev_size <= EMPTY_NATIVE_EXPORT_MAX_BYTES:
+        return False
+    try:
+        shutil.copy2(restore_from, path_bytes)
+    except (IOError, OSError):
+        return False
+    safe_print(
+        u"  Kept previous native export for "
+        + os.path.basename(path_bytes)
+        + u" (new export was empty stub "
+        + unicode(new_size)
+        + u" bytes, previous had "
+        + unicode(prev_size)
+        + u")"
+    )
+    return True
+
+
 def write_native(obj, path, recursive=False):
     # path может быть байтовой строкой или unicode; для export_native нужно передать str в Python 2.7?
     # obj.export_native ожидает, вероятно, байтовую строку. Преобразуем в bytes.
     path_bytes = ensure_unicode_path(path)
+    restore_from, restore_is_temp = _snapshot_previous_native_export(path_bytes)
     last_err = None
-    for attempt in range(8):
-        try:
-            if os.path.exists(path_bytes):
-                try:
-                    os.remove(path_bytes)
-                except (IOError, OSError):
-                    pass
-            obj.export_native(path_bytes, recursive=recursive)
-            break
-        except (IOError, OSError) as e:
-            last_err = e
-            if attempt + 1 < 8:
-                # File still locked by export_native / host — wait and free .NET refs.
-                time.sleep(0.15)
-                gc.collect()
-            else:
-                raise
-    # No sleep/gc on the success path: per-file pause made large exports slow and
-    # was not required on XS Studio (checked on Miratorg). Retry above is enough.
-    _normalize_export_timestamps(path_bytes)
+    try:
+        for attempt in range(8):
+            try:
+                if os.path.exists(path_bytes):
+                    try:
+                        os.remove(path_bytes)
+                    except (IOError, OSError):
+                        pass
+                obj.export_native(path_bytes, recursive=recursive)
+                break
+            except (IOError, OSError) as e:
+                last_err = e
+                if attempt + 1 < 8:
+                    # File still locked by export_native / host — wait and free .NET refs.
+                    time.sleep(0.15)
+                    gc.collect()
+                else:
+                    raise
+        # No sleep/gc on the success path: per-file pause made large exports slow and
+        # was not required on XS Studio (checked on Miratorg). Retry above is enough.
+        _normalize_export_timestamps(path_bytes)
+        _restore_if_hollow_native_export(path_bytes, restore_from)
+    finally:
+        if restore_is_temp and restore_from:
+            try:
+                if os.path.isfile(restore_from):
+                    os.remove(restore_from)
+            except (IOError, OSError):
+                pass
 
 
 _VARIABLE_MAP_RE = re.compile(

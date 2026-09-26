@@ -227,6 +227,25 @@ EXPORT_STAGING_SUFFIX = u".codescribe_export_staging"
 EXPORT_DISCARD_PREFIX = u".codescribe_discard_"
 EXPORT_BACKUP_PREFIX = u".codescribe_backup_"
 
+# Native export_native empty EntryList stubs are ~311 bytes on XS Studio / CODESYS.
+EMPTY_NATIVE_EXPORT_MAX_BYTES = 512
+
+
+def live_export_path_from_staging(path):
+    """
+    Map ``proj.codescribe_export_staging/...`` → ``proj/...``.
+
+    Staging exports start empty; the previous good native XML lives under the
+    live export folder. Used to avoid replacing a full Modbus/device dump with
+    a hollow EntryList stub when export_native flakes.
+    """
+    path = ensure_unicode_path(path)
+    marker = EXPORT_STAGING_SUFFIX
+    idx = path.find(marker)
+    if idx < 0:
+        return path
+    return path[:idx] + path[idx + len(marker) :]
+
 
 class ExportFolderLockedError(EnvironmentError):
     """Target export directory could not be replaced (often locked on Windows)."""

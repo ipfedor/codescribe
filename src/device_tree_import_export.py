@@ -24,8 +24,8 @@ _DEVICE_TYPE_GUID = u"225bfe47-7336-4dbc-9419-4105a7c831fa"
 _KNOWN_BUS_MASTERS = (u"Right_Expansion_Module", u"Modbus_COM", u"Left_Expansion_Module")
 _SECONDARY_COM_DEVICE_RE = re.compile(ur"^.+_COM\d+$", re.IGNORECASE)
 
-# Native export stubs with empty EntryList are ~311 bytes on XS Studio / CODESYS.
-_EMPTY_NATIVE_EXPORT_MAX_BYTES = 512
+# Alias: empty EntryList stubs (~311 B). See EMPTY_NATIVE_EXPORT_MAX_BYTES in util.
+_EMPTY_NATIVE_EXPORT_MAX_BYTES = EMPTY_NATIVE_EXPORT_MAX_BYTES
 
 
 def _as_unicode_name(name):
