@@ -891,13 +891,16 @@ PERSISTENT_VARIABLES_TYPE_GUID = u"6b3dfb6a-1865-4356-a39b-1fe0ef89651c"
 GVL_PERSISTENT_TYPE_GUID = u"261bd6e6-249c-4232-bb6f-84c2fbeef430"
 
 # Native exports kept for reference / diff only — live in .project template, not round-trip import.
-# RecipeManager stays skipped (LMGuids). PersistentVariables is imported under the live
-# RecipeManager so add/remove of retain VarNames round-trips from disk.
+# RecipeManager: LMGuids are project-local. PersistentVariables: recipe default-value
+# arrays vs VarName lists often desync after GVL edits; importing that XML causes
+# "Index was outside the bounds of the array" on Online comparison / unpack context.
+# RETAIN content is applied via PersistentVars.gvl.st only.
 IMPORT_SKIP_NATIVE_TYPE_GUIDS = frozenset([
     u"ae1de277-a207-4a28-9efb-456c06bd52f3",  # Task configuration
     u"f18bec89-9fef-401d-9953-2f11739a6808",  # Visualisation
     u"4d3fdb8f-ab50-4c35-9d3a-d4bb9bb9a628",  # Visualization manager
     RECIPE_MANAGER_TYPE_GUID,  # LMGuids / bindings are project-local
+    PERSISTENT_VARIABLES_TYPE_GUID,  # recipe defaults / VarName ids — sync in IDE only
 ])
 
 _EXPORT_ROOT_TYPE_GUID_RE = re.compile(
@@ -1270,16 +1273,20 @@ def _rewrite_native_device_import_guids(
 
 def should_skip_application_import_file(child, full_path):
     """
-    Task config, visualisations, vis manager and RecipeManager are exported for
-    diff/reference but must not be imported (template / LMGuid bindings).
+    Task config, visualisations, vis manager, RecipeManager and recipe
+    PersistentVariables are exported for diff/reference but must not be imported.
 
-    PersistentVariables.xml is imported under the live RecipeManager.
-    RETAIN GVL (PersistentVars) is applied via .gvl.st only; its .gvl.xml is skipped.
+    Mismatched recipe default-value vs VarName counts in PersistentVariables.xml
+    trigger IndexOutOfRange during Online comparison (unpack project context).
+    RETAIN GVL is applied via .gvl.st only; its .gvl.xml is also skipped.
     """
     filename, ext = os.path.splitext(child)
     if filename.endswith(u".vis") and ext == u".xml":
         return True
-    if ext == u".xml" and filename == u"RecipeManager":
+    if ext == u".xml" and filename in (
+        u"RecipeManager",
+        u"PersistentVariables",
+    ):
         return True
     if ext != u".xml":
         return False
