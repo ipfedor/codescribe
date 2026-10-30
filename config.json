@@ -7,6 +7,13 @@
         "Params": []
     },
     {
+        "Name": "Export PLC Logic To Files",
+        "Desc": "Export only Plc Logic / Application (Device/application/), not devices or communication.",
+        "Icon": "codescribe\\icons\\export_to_files.ico",
+        "Path": "codescribe\\src\\script_export_plc_logic_to_files.py",
+        "Params": []
+    },
+    {
         "Name": "Export Lib To Files",
         "Desc": "Export lib to files on disk.",
         "Icon": "codescribe\\icons\\export_to_files.ico",
@@ -18,6 +25,13 @@
         "Desc": "Import from files on disk.",
         "Icon": "codescribe\\icons\\import_from_files.ico",
         "Path": "codescribe\\src\\script_import_from_files.py",
+        "Params": []
+    },
+    {
+        "Name": "Import PLC Logic From Files",
+        "Desc": "Import only Plc Logic / Application (Device/application/), not devices or communication.",
+        "Icon": "codescribe\\icons\\import_from_files.ico",
+        "Path": "codescribe\\src\\script_import_plc_logic_from_files.py",
         "Params": []
     },
     {

@@ -63,6 +63,12 @@ Two layouts are supported:
 
 The Application branch (POUs, GVLs, etc.) is still exported only from `Device/application/`.
 
+### PLC Logic only
+
+**Export PLC Logic To Files** / **Import PLC Logic From Files** sync only `Device/application/` (CODESYS **Plc Logic** → **Application**: POUs, GVLs, DUTs, …). They do not write or import `Device/devices/` or `Device/communication/`. Task Configuration, visualisations, Visualization Manager, RecipeManager and `PersistentVariables.xml` follow the same import skip rules as full **Import From Files**.
+
+Use **Export To Files** / **Import From Files** for a full sync including fieldbus devices.
+
 **To disable fieldbus export for a project**, add a folder named `_NO_EXPORT` as a direct child of the PLC device (same name as used under `Communication` for the legacy path).
 
 **Legacy `Communication`-only disable:** `_NO_EXPORT` directly under `Communication` still skips the IFM communication export only.
@@ -151,7 +157,7 @@ Once installed, proceed to [Adding the Script Toolbar to CODESYS](#adding-the-sc
 
 5. Under Categories, scroll down, select ScriptEngine Commands and pick the script you want to add
 
-    - Scripts supplied by this repo are `Export To Files`, `Export From Files`, `Save As Template` and `Update From Template`
+    - Scripts supplied by this repo include `Export To Files`, `Export PLC Logic To Files`, `Import From Files`, `Import PLC Logic From Files`, `Save As Template` and `Update From Template`
 
     ![Step 5](docs/step_5.png)
 

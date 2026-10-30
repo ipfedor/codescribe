@@ -364,6 +364,85 @@ def _sync_tree_overwrite(src_root, dst_root):
             _copy_file(os.path.join(root, fn), os.path.join(dst_dir, fn))
 
 
+def _replace_dir_with_staging(live_path, staging_path):
+    """
+    Replace one live directory with a staging directory (rename-aside, then rename).
+
+    If the live folder is locked, fall back to file sync overwrite (same as
+    finalize_export_folder): new/changed files are copied; vanished files may remain.
+    """
+    live_path = ensure_unicode_path(live_path)
+    staging_path = ensure_unicode_path(staging_path)
+    if not os.path.isdir(staging_path):
+        return
+    parent = os.path.dirname(live_path)
+    if parent and (not os.path.isdir(parent)):
+        os.makedirs(parent)
+    if os.path.exists(live_path):
+        try:
+            _rename_aside_existing_dir(
+                live_path, EXPORT_BACKUP_PREFIX, allow_rmtree_fallback=False
+            )
+        except (OSError, IOError) as e:
+            try:
+                safe_print(u"Warning: folder locked, attempting file sync overwrite")
+                _sync_tree_overwrite(staging_path, live_path)
+                safe_print(u"Export synced into locked folder: " + live_path)
+                return
+            except Exception:
+                raise ExportFolderLockedError(
+                    _export_locked_message(live_path, staging_path, e)
+                )
+    try:
+        os.rename(staging_path, live_path)
+        return
+    except (OSError, IOError) as e:
+        try:
+            safe_print(u"Warning: rename failed, attempting file sync overwrite")
+            if not os.path.exists(live_path):
+                os.makedirs(live_path)
+            _sync_tree_overwrite(staging_path, live_path)
+            safe_print(u"Export synced into: " + live_path)
+            return
+        except Exception:
+            raise ExportFolderLockedError(
+                _export_locked_message(live_path, staging_path, e)
+            )
+
+
+def finalize_export_named_subfolders(target_folder, staging_folder, subfolder_name):
+    """
+    Replace only ``<device>/<subfolder_name>/`` under the live export folder.
+
+    Leaves siblings such as ``devices/`` and ``communication/`` untouched.
+    Returns the live subfolder paths that were replaced.
+    """
+    target = ensure_unicode_path(target_folder)
+    staging = ensure_unicode_path(staging_folder)
+    subfolder_name = _to_unicode_path(subfolder_name)
+    if not os.path.isdir(staging):
+        raise ValueError(u"Staging export folder does not exist: " + staging)
+    if not os.path.isdir(target):
+        os.makedirs(target)
+
+    replaced = []
+    for device_name in os.listdir(staging):
+        staging_device = ensure_unicode_path(os.path.join(staging, device_name))
+        if not os.path.isdir(staging_device):
+            continue
+        staging_sub = ensure_unicode_path(os.path.join(staging_device, subfolder_name))
+        if not os.path.isdir(staging_sub):
+            continue
+        live_sub = ensure_unicode_path(
+            os.path.join(target, device_name, subfolder_name)
+        )
+        _replace_dir_with_staging(live_sub, staging_sub)
+        replaced.append(live_sub)
+
+    _rename_aside_existing_dir(staging, EXPORT_DISCARD_PREFIX)
+    return replaced
+
+
 def finalize_export_folder(target_folder, staging_folder):
     """Move a finished staging export into the target folder."""
     target = ensure_unicode_path(target_folder)

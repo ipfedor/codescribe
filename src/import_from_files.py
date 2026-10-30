@@ -6,6 +6,7 @@ import os
 from communication_import_export import import_communication
 from device_tree_import_export import import_device_tree_siblings
 from entrypoint import (
+    APPLICATION_FOLDER_NAME,
     find_application,
     find_communication,
     get_device_entrypoints,
@@ -148,6 +149,29 @@ def import_directory_child(
                 import_pou_st(child, dir_path, dir_parent_obj, import_dir_fn)
 
 
+def import_application_from_device(device_obj, device_folder):
+    """Import Device/application/ (Plc Logic) only — not devices/ or communication/."""
+    application = find_application(device_obj)
+    application_folder = ensure_unicode_path(
+        os.path.join(device_folder, APPLICATION_FOLDER_NAME)
+    )
+    import_directory(application_folder, application, application)
+    remove_orphans_in_parent(application, application_folder)
+    return application
+
+
+def import_plc_logic_from_files(project):
+    # Keep unicode paths end-to-end (Windows Python 2.7; never utf-8 bytes).
+    src_folder = ensure_unicode_path(get_src_folder(project))
+    safe_print(u"Reading PLC Logic from: " + src_folder)
+    assert_path_exists(src_folder)
+
+    for device_obj in get_device_entrypoints(project):
+        device_folder = ensure_unicode_path(os.path.join(src_folder, device_obj.get_name()))
+        assert_path_exists(device_folder)
+        import_application_from_device(device_obj, device_folder)
+
+
 def import_from_files(project):
     # Keep unicode paths end-to-end (Windows Python 2.7; never utf-8 bytes).
     src_folder = ensure_unicode_path(get_src_folder(project))
@@ -158,10 +182,7 @@ def import_from_files(project):
         device_folder = ensure_unicode_path(os.path.join(src_folder, device_obj.get_name()))
         assert_path_exists(device_folder)
 
-        application = find_application(device_obj)
-        application_folder = ensure_unicode_path(os.path.join(device_folder, "application"))
-        import_directory(application_folder, application, application)
-        remove_orphans_in_parent(application, application_folder)
+        application = import_application_from_device(device_obj, device_folder)
 
         communication = find_communication(device_obj)
         if communication is not None:

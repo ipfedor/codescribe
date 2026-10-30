@@ -3,6 +3,9 @@
 from object_type import ObjectType, get_object_type
 from util import *
 
+# Plc Logic / Application branch on disk: <export>/<Device>/application/
+APPLICATION_FOLDER_NAME = u"application"
+
 
 def get_src_folder(project):
     working_dir = os.path.dirname(project.path)
@@ -22,6 +25,7 @@ def get_device_entrypoints(project):
 
 
 def find_application(device_obj):
+    """Application under Plc Logic (CODESYS device tree)."""
     return first_or_error(
         device_obj.find("Application", recursive=True),
         "Couldn't find Application inside " + device_obj.get_name(),
